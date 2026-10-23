@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "name": "120mm fan stand",
+  "units": "mm",
+  "decimals": 2,
+  "notes": "Example only: illustrative numbers, not measured from a real part.\n3.0 mm aluminum. Fan mounts under the top plate.",
+  "view": "front-right-top",
+  "panels": [
+    {
+      "id": "A",
+      "name": "Top plate",
+      "width": 140,
+      "height": 140,
+      "thickness": 3,
+      "attach": null,
+      "features": [
+        { "type": "hole", "diameter": 116, "x": { "ref": "left", "value": 12, "to": "near" }, "y": { "ref": "bottom", "value": 12, "to": "near" } },
+        { "type": "hole", "diameter": 4.3, "x": { "ref": "left", "value": 17.5, "to": "center" }, "y": { "ref": "bottom", "value": 17.5, "to": "center" } },
+        { "type": "hole", "diameter": 4.3, "x": { "ref": "right", "value": 17.5, "to": "center" }, "y": { "ref": "bottom", "value": 17.5, "to": "center" } },
+        { "type": "hole", "diameter": 4.3, "x": { "ref": "left", "value": 17.5, "to": "center" }, "y": { "ref": "top", "value": 17.5, "to": "center" } },
+        { "type": "hole", "diameter": 4.3, "x": { "ref": "right", "value": 17.5, "to": "center" }, "y": { "ref": "top", "value": 17.5, "to": "center" } }
+      ]
+    },
+    {
+      "id": "B",
+      "name": "Left leg",
+      "width": 140,
+      "height": 40,
+      "thickness": 3,
+      "attach": { "parent": "A", "edge": "left", "offset": 0, "angle": 90, "toward": "back" },
+      "features": [
+        { "type": "cutout", "width": 100, "height": 25, "x": { "ref": "left", "value": 20 }, "y": { "ref": "top", "value": 0 } }
+      ]
+    },
+    {
+      "id": "C",
+      "name": "Right leg",
+      "width": 140,
+      "height": 40,
+      "thickness": 3,
+      "attach": { "parent": "A", "edge": "right", "offset": 0, "angle": 90, "toward": "back" },
+      "features": [
+        { "type": "cutout", "width": 100, "height": 25, "x": { "ref": "left", "value": 20 }, "y": { "ref": "top", "value": 0 } }
+      ]
+    }
+  ]
+}

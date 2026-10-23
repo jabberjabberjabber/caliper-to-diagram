@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "name": "PCIe slot bracket",
+  "units": "mm",
+  "decimals": 2,
+  "notes": "Example only: illustrative numbers, not the PCIe specification.\n0.9 mm steel. Tab slot drawn as a round hole (slots are not supported yet).",
+  "view": "front-right-top",
+  "panels": [
+    {
+      "id": "A",
+      "name": "Main plate",
+      "width": 18.4,
+      "height": 112,
+      "thickness": 0.9,
+      "attach": null,
+      "features": [
+        { "type": "cutout", "width": 5.1, "height": 8, "x": { "ref": "left", "value": 0 }, "y": { "ref": "bottom", "value": 0 } },
+        { "type": "cutout", "width": 3.2, "height": 8, "x": { "ref": "right", "value": 0 }, "y": { "ref": "bottom", "value": 0 } },
+        { "type": "cutout", "width": 9, "height": 20, "x": { "ref": "left", "value": 4.7 }, "y": { "ref": "top", "value": 18 } },
+        { "type": "hole", "diameter": 3.2, "x": { "ref": "left", "value": 7.6, "to": "near" }, "y": { "ref": "bottom", "value": 22, "to": "near" } },
+        { "type": "hole", "diameter": 3.2, "x": { "ref": "left", "value": 7.6, "to": "near" }, "y": { "ref": "top", "value": 6, "to": "near" } }
+      ]
+    },
+    {
+      "id": "B",
+      "name": "Top tab",
+      "width": 18.4,
+      "height": 11.4,
+      "thickness": 0.9,
+      "attach": { "parent": "A", "edge": "top", "offset": 0, "angle": 90, "toward": "back" },
+      "features": [
+        { "type": "hole", "diameter": 4.4, "x": { "ref": "left", "value": 4.6, "to": "near" }, "y": { "ref": "top", "value": 2.5, "to": "near" } }
+      ]
+    }
+  ]
+}

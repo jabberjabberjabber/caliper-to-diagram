@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>caliper-to-diagram</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <strong class="brand">caliper → diagram</strong>
+    <label>Part name <input id="part-name" data-path="name" data-help="name" placeholder="e.g. PCIe bracket"></label>
+    <label>Units
+      <select id="units" data-help="units">
+        <option value="mm">mm</option>
+        <option value="in">inch</option>
+      </select>
+    </label>
+    <label>Decimals <input id="decimals" type="number" min="0" max="4" data-help="decimals"></label>
+    <span class="spacer"></span>
+    <button id="btn-new">New</button>
+    <button id="btn-open">Open…</button>
+    <button id="btn-save" title="Save the measurements as a .json file you can reopen and edit">Save</button>
+    <span class="sep"></span>
+    <button id="btn-svg" title="Drawing at 1:1 scale">SVG</button>
+    <button id="btn-dxf" title="2D CAD / laser / CNC exchange">DXF</button>
+    <button id="btn-scad" title="Parametric 3D model">OpenSCAD</button>
+    <button id="btn-print" title="Print at 100% for an actual-size drawing">Print 1:1</button>
+    <input type="file" id="file" accept=".json,application/json" hidden>
+  </header>
+
+  <main>
+    <div class="left">
+      <section class="guide">
+        <ol>
+          <li>Name the part and choose the units your calipers show.</li>
+          <li>Measure panel A: width, height, thickness.</li>
+          <li>Add holes and cutouts, measured from the datum edges (left and bottom).</li>
+          <li>If the part bends or has sides, add a joined face for each one.</li>
+          <li>Check the drawing and warnings, then export.</li>
+        </ol>
+        <div id="next"></div>
+      </section>
+
+      <div id="panels"></div>
+
+      <button id="btn-add-panel" class="wide">+ Add a face joined to another (bent tab, side, flange, leg)</button>
+
+      <label class="notes">Notes (printed on the drawing)
+        <textarea id="notes" rows="3" data-help="notes" placeholder="e.g. 1.0 mm steel. 2X M3 THREADED. UNLESS NOTED ±0.1"></textarea>
+      </label>
+    </div>
+
+    <div class="right">
+      <section id="help" class="help"></section>
+      <section class="preview">
+        <div class="preview-bar">
+          <span>Drawing</span>
+          <label>3D preview from
+            <select id="view" data-help="view">
+              <option value="front-right-top">front, right, top</option>
+              <option value="front-left-top">front, left, top</option>
+              <option value="back-right-top">back, right, top</option>
+              <option value="back-left-top">back, left, top</option>
+              <option value="front-right-bottom">front, right, bottom</option>
+              <option value="front-left-bottom">front, left, bottom</option>
+            </select>
+          </label>
+        </div>
+        <div id="drawing"></div>
+        <ul id="warnings"></ul>
+      </section>
+    </div>
+  </main>
+
+  <script src="units.js"></script>
+  <script src="model.js"></script>
+  <script src="drawing.js"></script>
+  <script src="export.js"></script>
+  <script src="help.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

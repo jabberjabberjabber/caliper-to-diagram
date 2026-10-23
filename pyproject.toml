@@ -1,0 +1,7 @@
+[project]
+name = "caliper-to-diagram"
+version = "0.1.0"
+description = "Turn caliper measurements into dimensioned technical drawings (SVG, DXF, OpenSCAD)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
