@@ -17,6 +17,10 @@ uv run main.py --port 0   # pick any free port
 The app is plain HTML/JavaScript in `web/` with no dependencies. You can also open `web/index.html`
 directly from disk. Your work autosaves in the browser; use **Save** to keep a `.json` file.
 
+While you edit a section of the form (a hole, a panel width, a joint), its dimensions and outline
+are drawn in orange in the preview, and the form row is marked in the same color. That makes it
+easy to see which numbers on the drawing came from which measurement. Exports and prints stay black.
+
 Two worked examples are in `examples/` (open them with **Open…**). Their numbers are illustrative,
 not measured from real parts.
 
@@ -29,6 +33,16 @@ not measured from real parts.
 - **Rectangular cutouts.** A size, plus the distance from the panel edges to the cutout's near edges.
   A cutout that touches or overruns an edge becomes a **notch**, which is how you make L-shapes,
   tabs and tongues.
+- **Slots.** Width and overall length, horizontal or vertical, located like holes. An **open** slot
+  (U-slot, like the screw slot on a PCIe bracket tab) runs out through an edge; you give its depth
+  from that edge.
+- **Angled edges.** A straight cut between two points, each located from the panel edges, plus which
+  side is cut off. A corner chamfer has one end on each of the two edges. Because the ends are
+  positioned independently, an angled edge can also sit on a notch, such as the tapered sides of a
+  bracket tongue. The drawing shows the resulting angle as a reference dimension, e.g. `(45.0°)`.
+
+Features can overlap and combine: the outline is computed exactly, with real arcs, so a hole that
+runs off an edge becomes a half-round notch and an angled edge can trim a notch.
 - **Joined faces (3D).** Any panel except A is joined to an edge of another panel: which edge, how far
   along it, the bend angle (90 = right angle, 0 = flat) and whether it bends toward the front or back.
   This places every face in 3D. The drawing notes each joint, marks it on the parent view, and shows a
@@ -65,15 +79,21 @@ interchange formats are DXF for 2D, STEP for 3D, and PDF for drawings. This tool
 node --test tests/core.test.js
 ```
 
+## Done since the first version
+
+- Slots, closed and open (U-slots)
+- Angled edges
+- OpenSCAD export lists every measurement in the Customizer, grouped by panel
+
 ## TODO
 
 Not built yet, roughly in order of usefulness:
 
-- [ ] Slots, including open U-slots like the screw slot on a PCIe bracket tab
 - [ ] Threaded hole callouts (M3, #6-32) and countersink / counterbore holes
 - [ ] Hole patterns: linear arrays and bolt circles, with center-to-center spacing input
 - [ ] Rounded corners (fillets) and chamfers on the outline
-- [ ] Non-rectangular outlines (angled edges)
+- [ ] Angled (diagonal) slots
+- [ ] Dimensions placed on the nearest side (right/top) instead of always below/left
 - [ ] Parts attached to a face instead of an edge (standoffs, legs, PEM nuts)
 - [ ] Sheet-metal bends: bend radius, thickness compensation and a true flat pattern
 - [ ] Tolerances on individual dimensions

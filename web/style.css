@@ -9,7 +9,7 @@ button.wide { width: 100%; margin: 6px 0 12px; }
 button.link { border: 0; background: none; padding: 0; color: #1747a6; text-align: left; cursor: pointer; }
 input, select, textarea { border: 1px solid #a9b3c2; border-radius: 3px; padding: 2px 4px; background: #fff; }
 input:focus, select:focus, textarea:focus { outline: 2px solid #4d7fd6; outline-offset: -1px; }
-input.len { width: 6.5em; text-align: right; }
+input.len { width: 5.5em; text-align: right; }
 input.num { width: 4.5em; text-align: right; }
 input.empty { background: #fff8db; }
 input.bad { background: #ffe1e1; border-color: #c33; }
@@ -28,7 +28,7 @@ main { display: grid; grid-template-columns: minmax(520px, 46%) 1fr; gap: 14px; 
 .guide ol { margin: 0 0 6px; padding-left: 20px; color: #4a5568; }
 #next { font-weight: 600; }
 
-.panel { margin-top: 12px; }
+.panel { margin-top: 12px; overflow-x: auto; }
 .panel header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .panel h2 { margin: 0; font-size: 16px; }
 .panel header input { flex: 1; }
@@ -41,8 +41,13 @@ main { display: grid; grid-template-columns: minmax(520px, 46%) 1fr; gap: 14px; 
 table.features { border-collapse: collapse; width: 100%; font-size: 13px; }
 table.features th { text-align: left; font-weight: 600; font-size: 12px; color: #4a5568; border-bottom: 1px solid #cdd4df; padding: 3px 4px; }
 table.features td { padding: 3px 4px; border-bottom: 1px solid #eef1f5; white-space: nowrap; }
-table.features td.pos { line-height: 1.9; }
+table.features td.pos, table.features td.size { line-height: 1.9; }
+table.features td.num { text-align: center; line-height: 1.6; }
+.panel .actions { flex-wrap: wrap; }
 
+/* The section being edited; its dimensions are drawn in the same color in the preview. */
+.editing { background: #fff4e6; box-shadow: inset 3px 0 0 #e8590c; }
+.panel .dims label.editing { color: #b9440a; box-shadow: none; background: none; }
 .notes { display: flex; flex-direction: column; gap: 4px; }
 .notes textarea { width: 100%; }
 

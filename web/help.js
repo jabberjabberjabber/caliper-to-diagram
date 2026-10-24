@@ -71,6 +71,7 @@
 
     cutSize: `<h3>Cutout / notch size</h3>
       <p>Width (left↔right) and height (bottom↕top) of a rectangular opening, measured with the <b>inside jaws</b>.</p>
+      <p>Need a rounded end? Use a slot. Need a sloped side? Add an angled edge.</p>
       <p><b>Notches and steps:</b> let the cutout touch or run past a panel edge. For example, 0 from the right edge
       and 0 from the top edge cuts a corner notch. That is how to make L-shapes, tabs and tongues
       (like the bottom tongue of a PCIe bracket).</p>`,
@@ -78,6 +79,44 @@
     cutPos: `<h3>Distance to the cutout</h3>
       <p>From the chosen panel edge to the <b>nearest edge of the opening</b>. Use the outside jaw tips across the
       strip of material between them, or the depth rod for a notch. Enter 0 if the cutout opens onto that edge.</p>`,
+
+    slotSize: `<h3>Slot width and length</h3>
+      <p><b>Width</b>: across the slot, with the <b>inside jaws</b>, the same way as a hole diameter.</p>
+      <p><b>Length</b> (closed slot): the overall length, end to end including both rounded ends, with the inside
+      jaws along the slot.</p>
+      <p><b>Depth</b> (open slot): from the edge the slot opens onto to the far, rounded end. Use the depth rod,
+      or the outside jaw tips against the edge and the end of the slot.</p>
+      <p>Slots of the same size are labeled together, e.g. <code>2X SLOT 4.20 × 10.00</code>.</p>`,
+
+    slotShape: `<h3>Slot direction and type</h3>
+      <p><b>Horizontal</b> slots run left↔right, <b>vertical</b> ones bottom↕top. (Angled slots aren't supported yet.)</p>
+      <p><b>Closed</b>: a slot entirely inside the panel. <b>Open to edge</b>: a U-shaped slot that runs out
+      through an edge, like the screw slot in a PCIe bracket tab.</p>`,
+
+    slotOpen: `<h3>Which edge the slot opens to</h3>
+      <p>The edge the U-slot runs out through. Its depth is measured from that edge.</p>`,
+
+    slotPos: `<h3>Slot position</h3>
+      <p><b>Across the slot</b>: from the panel edge to the near side of the slot (outside jaw tips across the strip
+      of material, as for holes), or to its centerline if you know it.</p>
+      <p><b>Along a closed slot</b>: from the panel edge to the near rounded end of the slot, or to the slot's center.</p>
+      <p>The drawing dimensions the slot's centerline and center, the standard way to locate a slot.</p>`,
+
+    angleToward: `<h3>Which side is cut off</h3>
+      <p>The direction of the material that is removed, beyond the angled line. For a chamfered bottom-left corner,
+      choose <b>bottom left</b>. Check the drawing preview: the removed side disappears.</p>`,
+
+    anglePoint: `<h3>Ends of an angled edge</h3>
+      <p>An angled edge is a straight line between two points. Each end is where the angled edge meets a straight
+      edge. Locate each end from the panel edges like any other feature.</p>
+      <p><b>Corner chamfer</b>: end 1 is on the bottom edge (vertical position <b>0</b> from bottom), so measure only how far
+      along it the angle starts. End 2 is on the left edge (horizontal position <b>0</b> from left), so measure how far up it
+      ends.</p>
+      <p><b>The corner is gone, so how do I measure from it?</b> Measure the straight part that is left and subtract it
+      from the overall size. For example, width 21.50 with 18.00 of straight bottom edge remaining means the angle
+      starts 3.50 from the left edge.</p>
+      <p>The drawing shows the resulting angle in parentheses, e.g. <code>(45.0°)</code>. That is a <i>reference</i>
+      dimension: it follows from the two measured ends.</p>`,
 
     attachParent: `<h3>Joined faces</h3>
       <p>A 3D part is drawn as its flat faces, each joined to another at an edge, like a bent bracket, a box side

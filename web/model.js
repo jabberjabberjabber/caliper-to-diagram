@@ -40,6 +40,29 @@
     y: { ref: "bottom", value: null },
   });
 
+  // Slots: width and overall length (rounded ends included), horizontal or vertical. An open slot
+  // (U-slot) runs out through the edge it is measured from; its length is the depth from that edge.
+  C.newSlot = () => ({
+    type: "slot",
+    width: null,
+    length: null,
+    orient: "h",
+    open: false,
+    x: { ref: "left", value: null, to: "near" },
+    y: { ref: "bottom", value: null, to: "near" },
+  });
+
+  // Angled edge: a straight cut between two points, each located from the panel edges. Material
+  // beyond the line on the chosen side is removed. A corner chamfer has one end on each edge.
+  C.newAngle = () => ({
+    type: "angle",
+    toward: "bottom-left",
+    p1: { x: { ref: "left", value: null }, y: { ref: "bottom", value: 0 } },
+    p2: { x: { ref: "left", value: 0 }, y: { ref: "bottom", value: null } },
+  });
+
+  C.TOWARD = { "bottom-left": [-1, -1], "bottom-right": [1, -1], "top-left": [-1, 1], "top-right": [1, 1] };
+
   C.nextPanelId = function (doc) {
     const used = new Set(doc.panels.map((p) => p.id));
     for (let i = 0; ; i++) {
@@ -61,20 +84,59 @@
 
   const num = (v) => typeof v === "number" && isFinite(v);
   C.panelComplete = (p) => num(p.width) && p.width > 0 && num(p.height) && p.height > 0;
-  C.featureComplete = function (f) {
-    const pos = num(f.x.value) && num(f.y.value);
-    return f.type === "hole"
-      ? pos && num(f.diameter) && f.diameter > 0
-      : pos && num(f.width) && f.width > 0 && num(f.height) && f.height > 0;
+
+  // Every value a feature needs, in the order the user should measure them.
+  // kind "size" must be > 0, kind "pos" may be any number. path is relative to the feature.
+  C.requiredFields = function (f, n, P) {
+    const size = (path, v, text) => ({ path, v, kind: "size", text });
+    const pos = (ax, what) => ({
+      path: `${ax}.value`, v: f[ax].value, kind: "pos",
+      text: `measure from the ${f[ax].ref} edge of ${P} to the ${what} (${n}).`,
+    });
+    const near = (ax, nearText, centerText) => (f[ax].to === "near" ? nearText : centerText);
+    switch (f.type) {
+      case "hole":
+        return [
+          size("diameter", f.diameter, `measure the diameter of ${n}.`),
+          pos("x", near("x", "near side of the hole", "hole center")),
+          pos("y", near("y", "near side of the hole", "hole center")),
+        ];
+      case "cutout":
+        return [
+          size("width", f.width, `measure the width of ${n}.`),
+          size("height", f.height, `measure the height of ${n}.`),
+          pos("x", "nearest edge of the cutout"),
+          pos("y", "nearest edge of the cutout"),
+        ];
+      case "slot": {
+        const along = f.orient === "h" ? "x" : "y", across = f.orient === "h" ? "y" : "x";
+        return [
+          size("width", f.width, `measure the width of ${n}.`),
+          size("length", f.length, f.open
+            ? `measure the depth of ${n}, from the ${f[along].ref} edge to the far end of the slot.`
+            : `measure the overall length of ${n}, end to end.`),
+          pos(across, near(across, "near side of the slot", "slot centerline")),
+          ...(f.open ? [] : [pos(along, near(along, "near end of the slot", "slot center"))]),
+        ];
+      }
+      case "angle":
+        return ["p1", "p2"].flatMap((k, i) => ["x", "y"].map((ax) => ({
+          path: `${k}.${ax}.value`, v: f[k][ax].value, kind: "pos",
+          text: `measure end ${i + 1} of ${n}: distance from the ${f[k][ax].ref} edge of ${P}.`,
+        })));
+    }
+    return [];
   };
+
+  const fieldOk = (r) => num(r.v) && (r.kind === "pos" || r.v > 0);
+  C.featureComplete = (f) => C.requiredFields(f, "", "").every(fieldOk);
+
+  const place = (d, a, size, low) => (a.ref === low ? d : size - d);
 
   C.holeCenter = function (p, f) {
     const r = f.diameter / 2;
-    const along = (a, size, lowRef) => {
-      const d = a.value + (a.to === "near" ? r : 0);
-      return a.ref === lowRef ? d : size - d;
-    };
-    return { x: along(f.x, p.width, "left"), y: along(f.y, p.height, "bottom") };
+    const at = (a, size, low) => place(a.value + (a.to === "near" ? r : 0), a, size, low);
+    return { x: at(f.x, p.width, "left"), y: at(f.y, p.height, "bottom") };
   };
 
   C.cutoutRect = function (p, f) {
@@ -83,69 +145,78 @@
     return { x0, y0, x1: x0 + f.width, y1: y0 + f.height };
   };
 
-  // Outline of a panel after rectangular cutouts are removed, as closed loops of [x, y] points
-  // (outer boundary counter-clockwise, interior openings clockwise). Cutouts that overrun an edge
-  // become notches. Works on the grid formed by all rectangle edges, so it is exact for rectangles.
-  C.panelOutline = function (p) {
-    const W = p.width, H = p.height;
-    const clamp = (v, hi) => Math.min(Math.max(v, 0), hi);
-    const rects = p.features
-      .filter((f) => f.type === "cutout" && C.featureComplete(f))
-      .map((f) => C.cutoutRect(p, f))
-      .map((r) => ({ x0: clamp(r.x0, W), x1: clamp(r.x1, W), y0: clamp(r.y0, H), y1: clamp(r.y1, H) }))
-      .filter((r) => r.x1 - r.x0 > EPS && r.y1 - r.y0 > EPS);
-    const uniq = (vals) =>
-      vals.sort((a, b) => a - b).filter((v, i, a) => i === 0 || v - a[i - 1] > EPS);
-    const xs = uniq([0, W, ...rects.flatMap((r) => [r.x0, r.x1])]);
-    const ys = uniq([0, H, ...rects.flatMap((r) => [r.y0, r.y1])]);
-
-    const nx = xs.length - 1, ny = ys.length - 1;
-    const inside = (i, j) => {
-      if (i < 0 || j < 0 || i >= nx || j >= ny) return false;
-      const mx = (xs[i] + xs[i + 1]) / 2, my = (ys[j] + ys[j + 1]) / 2;
-      return !rects.some((r) => mx > r.x0 && mx < r.x1 && my > r.y0 && my < r.y1);
-    };
-
-    // Boundary edges between inside and outside cells, oriented with the material on the left.
-    const segs = new Map(); // "i,j" start vertex -> list of end vertices
-    const addSeg = (a, b) => {
-      const k = a.join(",");
-      if (!segs.has(k)) segs.set(k, []);
-      segs.get(k).push(b);
-    };
-    for (let i = 0; i < nx; i++)
-      for (let j = 0; j < ny; j++) {
-        if (!inside(i, j)) continue;
-        if (!inside(i, j - 1)) addSeg([i, j], [i + 1, j]);
-        if (!inside(i + 1, j)) addSeg([i + 1, j], [i + 1, j + 1]);
-        if (!inside(i, j + 1)) addSeg([i + 1, j + 1], [i, j + 1]);
-        if (!inside(i - 1, j)) addSeg([i, j + 1], [i, j]);
-      }
-
-    const loops = [];
-    for (const [startKey, ends] of segs) {
-      while (ends.length) {
-        const loop = [startKey.split(",").map(Number)];
-        let next = ends.pop();
-        while (next.join(",") !== startKey) {
-          loop.push(next);
-          const out = segs.get(next.join(","));
-          if (!out || !out.length) break;
-          next = out.pop();
-        }
-        loops.push(simplify(loop.map(([i, j]) => [xs[i], ys[j]])));
-      }
+  // Slot as the segment a-b between its two arc centers, radius r. For an open slot, a lies
+  // outside the panel so the slot runs out through the edge.
+  C.slotGeom = function (p, f) {
+    const r = f.width / 2, h = f.orient === "h";
+    const along = h ? f.x : f.y, across = h ? f.y : f.x;
+    const aSize = h ? p.width : p.height, cSize = h ? p.height : p.width;
+    const lowA = h ? "left" : "bottom", lowC = h ? "bottom" : "left";
+    const c = place(across.value + (across.to === "near" ? r : 0), across, cSize, lowC);
+    let d0, d1, mid;
+    if (f.open) {
+      d0 = -f.width;
+      d1 = f.length - r;
+    } else {
+      const half = Math.max(0, f.length / 2 - r);
+      mid = along.value + (along.to === "near" ? f.length / 2 : 0);
+      d0 = mid - half;
+      d1 = mid + half;
     }
-    return loops;
+    const P = (d) => { const v = place(d, along, aSize, lowA); return h ? [v, c] : [c, v]; };
+    return {
+      a: P(d0), b: P(d1), r, across: c,
+      // Coordinate (along the slot) that the drawing dimensions: slot center, or far end if open.
+      alongDim: place(f.open ? f.length : mid, along, aSize, lowA),
+      edge: place(0, along, aSize, lowA),
+    };
   };
 
-  // Drop points that sit in the middle of a straight run.
-  function simplify(loop) {
-    return loop.filter((p, k) => {
-      const a = loop[(k + loop.length - 1) % loop.length], b = loop[(k + 1) % loop.length];
-      return !((a[0] === p[0] && p[0] === b[0]) || (a[1] === p[1] && p[1] === b[1]));
-    });
-  }
+  C.anglePoints = (p, f) =>
+    [f.p1, f.p2].map((q) => [
+      q.x.ref === "left" ? q.x.value : p.width - q.x.value,
+      q.y.ref === "bottom" ? q.y.value : p.height - q.y.value,
+    ]);
+
+  // Unit normal of an angled cut, pointing toward the side that is removed.
+  C.angleNormal = function (p, f) {
+    const [p1, p2] = C.anglePoints(p, f), d = [p2[0] - p1[0], p2[1] - p1[1]], L = Math.hypot(...d);
+    if (L < 1e-9) return null;
+    const n = [d[1] / L, -d[0] / L], t = C.TOWARD[f.toward];
+    return n[0] * t[0] + n[1] * t[1] >= 0 ? n : [-n[0], -n[1]];
+  };
+
+  // Outer rectangle plus every complete feature as a cutter shape.
+  C.panelShapes = function (p) {
+    const W = p.width, H = p.height, far = 10 * (W + H);
+    const outer = { kind: "poly", pts: [[0, 0], [W, 0], [W, H], [0, H]] };
+    const cutters = [];
+    for (const f of p.features) {
+      if (!C.featureComplete(f)) continue;
+      if (f.type === "hole") {
+        const c = C.holeCenter(p, f);
+        cutters.push({ kind: "circle", c: [c.x, c.y], r: f.diameter / 2 });
+      } else if (f.type === "cutout") {
+        const r = C.cutoutRect(p, f);
+        cutters.push({ kind: "poly", pts: [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]] });
+      } else if (f.type === "slot") {
+        const s = C.slotGeom(p, f);
+        cutters.push({ kind: "stadium", a: s.a, b: s.b, r: s.r });
+      } else if (f.type === "angle") {
+        const n = C.angleNormal(p, f);
+        if (!n) continue;
+        const [p1, p2] = C.anglePoints(p, f);
+        const out = (q) => [q[0] + n[0] * far, q[1] + n[1] * far];
+        cutters.push({ kind: "poly", pts: [p1, p2, out(p2), out(p1)] });
+      }
+    }
+    return { outer, cutters };
+  };
+
+  C.panelGeometry = function (p) {
+    const { outer, cutters } = C.panelShapes(p);
+    return { outer, cutters, pieces: C.boundary(outer, cutters) };
+  };
 
   // ---- 3D placement -------------------------------------------------------------------------
 
@@ -222,25 +293,45 @@
         }
       }
       p.features.forEach((f, j) => {
-        const tagF = `${tag}, row ${j + 1} (${f.type})`;
+        const tagF = `${tag}, row ${j + 1} (${FEATURE_NAME[f.type]})`;
         if (!C.featureComplete(f)) {
           out.push(`${tagF}: missing measurements, not drawn yet.`);
           return;
         }
-        if (f.x.value < 0 || f.y.value < 0) out.push(`${tagF}: has a negative distance, check the measurement.`);
+        const values = C.requiredFields(f, "", "").filter((r) => r.kind === "pos").map((r) => r.v);
+        if (values.some((v) => v < 0)) out.push(`${tagF}: has a negative distance, check the measurement.`);
+        const breaks = (pts, r) =>
+          pts.some(([x, y]) => x - r < -EPS || y - r < -EPS || x + r > p.width + EPS || y + r > p.height + EPS);
         if (f.type === "hole") {
-          const c = C.holeCenter(p, f), r = f.diameter / 2;
-          if (c.x - r < -EPS || c.y - r < -EPS || c.x + r > p.width + EPS || c.y + r > p.height + EPS)
+          const c = C.holeCenter(p, f);
+          if (breaks([[c.x, c.y]], f.diameter / 2))
             out.push(`${tagF}: the hole breaks through the panel edge. Check the value and which edge it is measured from.`);
-        } else {
+        } else if (f.type === "cutout") {
           const r = C.cutoutRect(p, f);
           if (r.x1 <= EPS || r.y1 <= EPS || r.x0 >= p.width - EPS || r.y0 >= p.height - EPS)
             out.push(`${tagF}: the cutout lies completely outside the panel.`);
+        } else if (f.type === "slot") {
+          const s = C.slotGeom(p, f);
+          if (!f.open && f.length < f.width - EPS)
+            out.push(`${tagF}: the length is the overall length including the rounded ends, so it can't be less than the width.`);
+          if (!f.open && breaks([s.a, s.b], s.r))
+            out.push(`${tagF}: the slot breaks through the panel edge. If it is a U-slot open to the edge, set it to "open".`);
+          if (f.open && breaks([s.b], s.r))
+            out.push(`${tagF}: the slot runs out through another edge. Check the depth and position.`);
+        } else if (f.type === "angle") {
+          const [a, b] = C.anglePoints(p, f);
+          const n = C.angleNormal(p, f);
+          if (!n) out.push(`${tagF}: both ends are at the same point.`);
+          else if (Math.abs(n[0] * C.TOWARD[f.toward][0] + n[1] * C.TOWARD[f.toward][1]) < 1e-6)
+            out.push(`${tagF}: the cut runs straight toward the ${f.toward} corner, so which side to remove is unclear. Pick a neighboring direction.`);
+          if (breaks([a, b], 0)) out.push(`${tagF}: an end lies outside the panel.`);
         }
       });
     }
     return out;
   };
+
+  const FEATURE_NAME = { hole: "hole", cutout: "cutout", slot: "slot", angle: "angled edge" };
 
   // The first thing still to be measured, with the data-path of its input field.
   C.nextStep = function (doc) {
@@ -251,25 +342,13 @@
       if (!(p.height > 0)) return { path: `p${i}.height`, text: `measure the height of ${P} (bottom edge to top edge).` };
       if (!(p.thickness > 0)) return { path: `p${i}.thickness`, text: `measure the thickness of ${P}.` };
       for (const [j, f] of p.features.entries()) {
-        const base = `p${i}.f${j}`, n = `${f.type} ${j + 1} on ${P}`;
-        if (f.type === "hole") {
-          if (!(f.diameter > 0)) return { path: `${base}.diameter`, text: `measure the diameter of ${n}.` };
-        } else {
-          if (!(f.width > 0)) return { path: `${base}.width`, text: `measure the width of ${n}.` };
-          if (!(f.height > 0)) return { path: `${base}.height`, text: `measure the height of ${n}.` };
-        }
-        for (const ax of ["x", "y"]) {
-          const a = f[ax];
-          if (a.value == null) {
-            const to = f.type === "cutout" ? "nearest edge of the cutout" : a.to === "near" ? "near side of the hole" : "hole center";
-            return { path: `${base}.${ax}.value`, text: `measure from the ${a.ref} edge of ${P} to the ${to} (${n}).` };
-          }
-        }
+        const missing = C.requiredFields(f, `${FEATURE_NAME[f.type]} ${j + 1} on ${P}`, P).find((r) => !fieldOk(r));
+        if (missing) return { path: `p${i}.f${j}.${missing.path}`, text: missing.text };
       }
     }
     return {
       path: null,
-      text: "everything entered is measured. Add more holes, cutouts or joined faces, or export the drawing.",
+      text: "everything entered is measured. Add more features or joined faces, or export the drawing.",
     };
   };
 })((globalThis.C2D = globalThis.C2D || {}));

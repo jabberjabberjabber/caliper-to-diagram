@@ -21,7 +21,7 @@
       else if (v === true) el.setAttribute(k, "");
       else if (v != null && v !== false) el.setAttribute(k, v);
     }
-    for (const kid of kids.flat()) if (kid != null) el.append(kid);
+    for (const kid of kids.flat(Infinity)) if (kid != null) el.append(kid);
     return el;
   }
 
@@ -69,30 +69,40 @@
     return el;
   }
 
+  function boolSel(obj, key, [offLabel, onLabel], help, after) {
+    const el = h("select", { "data-help": help },
+      h("option", { value: "false", selected: !obj[key] }, offLabel),
+      h("option", { value: "true", selected: !!obj[key] }, onLabel));
+    el.addEventListener("change", () => { obj[key] = el.value === "true"; (after || changed)(); });
+    return el;
+  }
+
   // ---- Panels -------------------------------------------------------------------------------
 
   function panelCard(p, i) {
     return h("section", { class: "panel" },
       h("header", {},
         h("h2", {}, `Panel ${p.id}`),
-        textInput(p, "name", { placeholder: "name, e.g. top tab", "data-help": "default" }),
+        textInput(p, "name", { placeholder: "name, e.g. top tab", "data-help": "default", "data-tag": `p${i}.name` }),
         p.attach ? h("button", { class: "danger", onclick: () => removePanel(p) }, "Remove") : null),
       h("div", { class: "dims" },
-        h("label", {}, "Width (left ↔ right)", lenInput(p, "width", `p${i}.width`, "width")),
-        h("label", {}, "Height (bottom ↕ top)", lenInput(p, "height", `p${i}.height`, "height")),
-        h("label", {}, "Thickness", lenInput(p, "thickness", `p${i}.thickness`, "thickness"))),
+        h("label", { "data-tag": `p${i}.width` }, "Width (left ↔ right)", lenInput(p, "width", `p${i}.width`, "width")),
+        h("label", { "data-tag": `p${i}.height` }, "Height (bottom ↕ top)", lenInput(p, "height", `p${i}.height`, "height")),
+        h("label", { "data-tag": `p${i}.thickness` }, "Thickness", lenInput(p, "thickness", `p${i}.thickness`, "thickness"))),
       p.attach ? attachRow(p, i)
         : h("p", { class: "hint" }, "Reference face. Datum edges: LEFT and BOTTOM. Measure positions from these unless a feature is much closer to the opposite edge."),
       featureTable(p, i),
       h("div", { class: "actions" },
         h("button", { onclick: () => addFeature(p, i, C.newHole(), "diameter") }, "+ Hole"),
-        h("button", { onclick: () => addFeature(p, i, C.newCutout(), "width") }, "+ Rectangular cutout / notch")));
+        h("button", { onclick: () => addFeature(p, i, C.newSlot(), "width") }, "+ Slot"),
+        h("button", { onclick: () => addFeature(p, i, C.newCutout(), "width") }, "+ Rectangular cutout / notch"),
+        h("button", { onclick: () => addFeature(p, i, C.newAngle(), "p1.x.value") }, "+ Angled edge")));
   }
 
   function attachRow(p, i) {
     const a = p.attach;
     const parents = doc.panels.filter((q) => !C.isDescendant(doc, q, p));
-    return h("div", { class: "attach" },
+    return h("div", { class: "attach", "data-tag": `p${i}.attach` },
       "Joined to panel ",
       sel(a, "parent", parents.map((q) => [q.id, q.id + (q.name ? ` (${q.name})` : "")]), "attachParent", renderAll),
       " along its ",
@@ -110,27 +120,47 @@
     if (!p.features.length) return h("p", { class: "hint" }, "No holes or cutouts yet.");
     return h("table", { class: "features" },
       h("thead", {}, h("tr", {},
-        h("th", {}, "#"), h("th", {}, "Size"), h("th", {}, "Horizontal position"), h("th", {}, "Vertical position"), h("th", {}))),
+        h("th", {}, "#"), h("th", {}, "Size"), h("th", {}, "Horizontal position"), h("th", {}, "Vertical position"))),
       h("tbody", {}, p.features.map((f, j) => featureRow(p, i, f, j))));
   }
 
+  const REFS = { x: [["left", "left"], ["right", "right"]], y: [["bottom", "bottom"], ["top", "top"]] };
+
   function featureRow(p, i, f, j) {
-    const base = `p${i}.f${j}`, hole = f.type === "hole";
-    const size = hole
-      ? h("span", {}, "hole Ø ", lenInput(f, "diameter", `${base}.diameter`, "holeDia"))
-      : h("span", {}, "cutout ", lenInput(f, "width", `${base}.width`, "cutSize"), " × ", lenInput(f, "height", `${base}.height`, "cutSize"));
-    const pos = (ax, refs) => h("td", { class: "pos" },
-      "from ", sel(f[ax], "ref", refs, hole ? "holeRef" : "cutPos"), " ",
-      lenInput(f[ax], "value", `${base}.${ax}.value`, hole ? "holePos" : "cutPos"), h("br"),
-      hole ? ["to ", sel(f[ax], "to", [["near", "near side"], ["center", "center"]], "holeTo")] : "to near edge");
-    return h("tr", {},
-      h("td", {}, j + 1),
-      h("td", {}, size),
-      pos("x", [["left", "left"], ["right", "right"]]),
-      pos("y", [["bottom", "bottom"], ["top", "top"]]),
-      h("td", {},
-        h("button", { class: "icon", title: "Duplicate (handy for hole patterns)", onclick: () => duplicateFeature(p, i, j) }, "⧉"), " ",
-        h("button", { class: "icon danger", title: "Delete", onclick: () => { p.features.splice(j, 1); renderAll(); } }, "✕")));
+    const base = `p${i}.f${j}`;
+    const len = (obj, key, path, help) => lenInput(obj, key, `${base}.${path}`, help);
+    const fromEdge = (a, ax, path, help) => ["from ", sel(a, "ref", REFS[ax], help), " ", len(a, "value", path, help)];
+    const toSel = (a, help, nearLabel) => ["to ", sel(a, "to", [["near", nearLabel], ["center", "center"]], help)];
+    let size, cell;
+    if (f.type === "hole") {
+      size = ["hole Ø ", len(f, "diameter", "diameter", "holeDia")];
+      cell = (ax) => [fromEdge(f[ax], ax, `${ax}.value`, "holePos"), h("br"), toSel(f[ax], "holeTo", "near side")];
+    } else if (f.type === "cutout") {
+      size = ["cutout ", len(f, "width", "width", "cutSize"), " × ", len(f, "height", "height", "cutSize")];
+      cell = (ax) => [fromEdge(f[ax], ax, `${ax}.value`, "cutPos"), h("br"), "to near edge"];
+    } else if (f.type === "slot") {
+      const along = f.orient === "h" ? "x" : "y";
+      size = [
+        "slot ", len(f, "width", "width", "slotSize"), " wide", h("br"),
+        len(f, "length", "length", "slotSize"), f.open ? " deep" : " long", h("br"),
+        sel(f, "orient", [["h", "horizontal"], ["v", "vertical"]], "slotShape", renderAll), " ",
+        boolSel(f, "open", ["closed", "open to edge"], "slotShape", renderAll),
+      ];
+      cell = (ax) => ax === along && f.open
+        ? ["opens to the ", sel(f[ax], "ref", REFS[ax], "slotOpen"), " edge"]
+        : [fromEdge(f[ax], ax, `${ax}.value`, "slotPos"), h("br"), toSel(f[ax], "slotPos", ax === along ? "near end" : "near side")];
+    } else {
+      size = ["angled edge", h("br"), "cut off toward the ", h("br"),
+        sel(f, "toward", Object.keys(C.TOWARD).map((k) => [k, k.replace("-", " ")]), "angleToward")];
+      cell = (ax) => ["p1", "p2"].map((k, n) => [n ? h("br") : null, `end ${n + 1} `, fromEdge(f[k][ax], ax, `${k}.${ax}.value`, "anglePoint")]);
+    }
+    return h("tr", { "data-tag": base },
+      h("td", { class: "num" }, j + 1, h("br"),
+        h("button", { class: "icon", title: "Duplicate (handy for hole patterns)", onclick: () => duplicateFeature(p, i, j) }, "⧉"), h("br"),
+        h("button", { class: "icon danger", title: "Delete", onclick: () => { p.features.splice(j, 1); renderAll(); } }, "✕")),
+      h("td", { class: "size" }, size),
+      h("td", { class: "pos" }, cell("x")),
+      h("td", { class: "pos" }, cell("y")));
   }
 
   function addFeature(p, i, f, firstField) {
@@ -142,7 +172,8 @@
   function duplicateFeature(p, i, j) {
     p.features.splice(j + 1, 0, JSON.parse(JSON.stringify(p.features[j])));
     renderAll();
-    focusPath(`p${i}.f${j + 1}.x.value`);
+    const first = document.querySelector(`[data-path^="p${i}.f${j + 1}."]`);
+    if (first) focusPath(first.dataset.path);
   }
 
   function removePanel(p) {
@@ -172,6 +203,8 @@
     $("#notes").value = doc.notes;
     $("#view").value = doc.view;
     $("#panels").replaceChildren(...doc.panels.map(panelCard));
+    const section = activeTag && document.querySelector(`[data-tag="${activeTag}"]`);
+    if (section) section.classList.add("editing");
     refresh();
   }
 
@@ -179,13 +212,17 @@
 
   function refresh() {
     localStorage.setItem(STORE, JSON.stringify(doc));
-    $("#drawing").innerHTML = C.toSVG(C.buildSheet(doc));
+    drawPreview();
     $("#warnings").replaceChildren(...C.validate(doc).map((w) => h("li", {}, w)));
     const step = C.nextStep(doc);
     $("#next").replaceChildren(step.path
       ? h("button", { class: "link", onclick: () => focusPath(step.path) }, "Next: " + step.text)
       : h("span", {}, "Done: " + step.text));
   }
+
+  // The form section being edited ("p0.f3", "p1.attach", ...): its dimensions are colored in the preview.
+  let activeTag = null;
+  function drawPreview() { $("#drawing").innerHTML = C.toSVG(C.buildSheet(doc), { highlight: activeTag }); }
 
   function showHelp(key) { $("#help").innerHTML = C.HELP[key] || C.HELP.default; }
 
@@ -251,7 +288,17 @@
   window.addEventListener("beforeprint", () => { $("#drawing").innerHTML = C.toSVG(C.buildSheet(doc), { physical: true }); });
   window.addEventListener("afterprint", refresh);
 
-  document.addEventListener("focusin", (e) => { if (e.target.dataset && e.target.dataset.help) showHelp(e.target.dataset.help); });
+  document.addEventListener("focusin", (e) => {
+    if (e.target.dataset && e.target.dataset.help) showHelp(e.target.dataset.help);
+    const section = e.target.closest && e.target.closest("[data-tag]");
+    const tag = section ? section.dataset.tag : null;
+    if (tag !== activeTag) {
+      document.querySelectorAll(".editing").forEach((el) => el.classList.remove("editing"));
+      if (section) section.classList.add("editing");
+      activeTag = tag;
+      drawPreview();
+    }
+  });
 
   showHelp("default");
   renderAll();
