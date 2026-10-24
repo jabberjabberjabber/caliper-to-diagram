@@ -7,6 +7,11 @@ mounting something.
 You never place anything freely. Every feature is positioned by a measured distance from an edge of
 the face that contains it, which is how calipers measure and how professional drawings are dimensioned.
 
+![The app with a NIC end bracket: measurements on the left, the dimensioned drawing and 3D preview on the right](docs/app-nic-bracket.png)
+
+*Measuring a NIC end bracket. The cutout being edited (row 5) and its dimensions on the drawing are
+highlighted in orange; the 3D preview shows how the mounting tab folds.*
+
 ## Running
 
 ```
