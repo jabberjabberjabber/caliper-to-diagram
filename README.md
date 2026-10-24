@@ -69,6 +69,11 @@ runs off an edge becomes a half-round notch and an angled edge can trim a notch.
 | **DXF** (R12) | 2D CAD exchange: FreeCAD, Fusion 360, LibreCAD, Inkscape, laser cutters and CNC. Geometry is on the `OUTLINE` layer; dimensions, center lines and text are on their own layers so you can hide them. |
 | **OpenSCAD** (.scad) | A parametric 3D model. Each measurement is a named variable and positions are expressions of them, so editing one value moves everything that depends on it. OpenSCAD can export STL for 3D printing, and FreeCAD can import .scad files. |
 
+![A NIC end bracket exported to OpenSCAD, with its measurements listed in the Customizer](docs/openscad-nic-bracket.png)
+
+*A NIC end bracket measured with this tool and opened in OpenSCAD. Each measurement shows up as a
+named, editable parameter in the Customizer on the right.*
+
 Professional parametric work happens in CAD (FreeCAD, Fusion 360, Onshape, SolidWorks). The usual
 interchange formats are DXF for 2D, STEP for 3D, and PDF for drawings. This tool covers DXF and PDF
 (through print); STEP is on the TODO list.
