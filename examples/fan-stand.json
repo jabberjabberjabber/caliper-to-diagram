@@ -95,6 +95,10 @@
       "attach": {
         "parent": "A",
         "edge": "left",
+        "line": {
+          "ref": "left",
+          "value": 0
+        },
         "offset": 0,
         "angle": 90,
         "toward": "back"
@@ -158,6 +162,10 @@
       "attach": {
         "parent": "A",
         "edge": "right",
+        "line": {
+          "ref": "right",
+          "value": 0
+        },
         "offset": 0,
         "angle": 90,
         "toward": "back"

@@ -140,6 +140,10 @@
       "attach": {
         "parent": "A",
         "edge": "top",
+        "line": {
+          "ref": "top",
+          "value": 0
+        },
         "offset": 0,
         "angle": 90,
         "toward": "back"

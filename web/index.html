@@ -56,6 +56,11 @@
       <section class="preview">
         <div class="preview-bar">
           <span>Drawing</span>
+          <span class="zoom" title="Scroll to zoom, drag to move around. Click a number to change it.">
+            <button id="zoom-out" class="icon" title="Zoom out">−</button>
+            <button id="zoom-in" class="icon" title="Zoom in">+</button>
+            <button id="zoom-fit" title="Show the whole sheet">Fit</button>
+          </span>
           <label>3D preview from
             <select id="view" data-help="view">
               <option value="front-right-top">front, right, top</option>
@@ -67,7 +72,9 @@
             </select>
           </label>
         </div>
-        <div id="drawing"></div>
+        <div id="drawing-wrap">
+          <div id="drawing"></div>
+        </div>
         <ul id="warnings"></ul>
       </section>
     </div>

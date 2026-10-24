@@ -39,7 +39,10 @@
       value and mention it in Notes.</p>`,
 
     height: `<h3>Height (bottom ↕ top)</h3>
-      <p>Same method as width, across the bottom and top edges, using the <b>outside jaws</b>.</p>`,
+      <p>Same method as width, across the bottom and top edges, using the <b>outside jaws</b>.</p>
+      <p>For a face joined to another (a bent flange or tab), the joined edge is the bend: measure from the
+      <b>outside</b> of the bend (the outer surface of the other face) to the far edge. That is the overall
+      outside size of the flange, the same thing the outside jaws read when they straddle it.</p>`,
 
     thickness: `<h3>Thickness</h3>
       <p>Clamp the material between the <b>outside jaws</b> away from bends, burrs and holes.
@@ -122,13 +125,25 @@
       <p>A 3D part is drawn as its flat faces, each joined to another at an edge, like a bent bracket, a box side
       or a table leg. Pick the face this one is joined to. Panel A is the reference that all others hang off.</p>`,
 
-    attachEdge: `<h3>Which edge</h3>
-      <p>The edge of the other face (as it is drawn) where this face is joined.
-      This face is always drawn with its joined edge at the <b>bottom</b> of its own view.</p>`,
+    attachEdge: `<h3>Which side</h3>
+      <p>The side of the other face (as it is drawn) that this face is joined along.
+      This face is always drawn with its joined edge at the <b>bottom</b> of its own view.</p>
+      <p>Next you'll give the exact bend line, which may be in from that side if cutouts trimmed it.</p>`,
 
-    attachOffset: `<h3>Position along the edge</h3>
-      <p>Distance from the <b>left end</b> of the other face's top/bottom edge, or the <b>bottom end</b> of its
-      left/right edge, to where this face starts. Enter 0 if it starts at the corner.</p>
+    attachLine: `<h3>Bend line</h3>
+      <p>Where the bend is on the other face, measured from one of its edges parallel to the bend.</p>
+      <p>If the face bends right at the outside edge, enter <b>0</b> from that edge. If cutouts have trimmed that
+      side (for example a slot cover with 4 mm removed along its left side), the bend is on the edge that is
+      left: enter <b>4</b> from the left edge. You can also measure from the opposite edge, whichever is easier to reach.</p>
+      <p>The bend line is the <b>outside</b> edge of the bend, which is what you can touch with the calipers.
+      The joined face's thickness lies inside the bend, so the two faces form one solid corner, like the real
+      part. All sizes on bent parts are outside dimensions.</p>
+      <p>The app checks that the bend line runs along an edge of the material for the full width of this face,
+      and warns you if it doesn't. It never moves the bend for you.</p>`,
+
+    attachOffset: `<h3>Position along the side</h3>
+      <p>Distance from the <b>left end</b> of the other face's top/bottom side, or the <b>bottom end</b> of its
+      left/right side, to where this face starts. Enter 0 if it starts at the corner.</p>
       <p>When measuring this face, hold it so its <b>left end</b> is the end nearest that starting point, so the
       left/right directions stay consistent between the views.</p>`,
 

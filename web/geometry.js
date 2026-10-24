@@ -150,10 +150,12 @@
     return null;
   }
 
+  C.inMaterial = (outer, cutters, p) => contains(outer, p) && !cutters.some((s) => contains(s, p));
+
   C.boundary = function (outer, cutters) {
     const shapes = [outer, ...cutters];
     const els = shapes.map(elements);
-    const material = (p) => contains(outer, p) && !cutters.some((s) => contains(s, p));
+    const material = (p) => C.inMaterial(outer, cutters, p);
     const pieces = [], seen = new Set();
     els.forEach((list, si) =>
       list.forEach((e) => {

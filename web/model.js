@@ -1,5 +1,9 @@
-// Part model: panels (flat faces) with holes and rectangular cutouts, joined at edges.
+// Part model: panels (flat faces) with holes, slots, cutouts and angled edges, joined at edges.
 // All lengths in mm. Panel coordinates: x = left→right, y = bottom→top, z = toward the viewer (front).
+//
+// Rule: every value comes from the user. Nothing is guessed or pre-filled; an unmeasured value is
+// null and the walkthrough asks for it. Values are only ever derived (hole center = near side +
+// radius), and inconsistent input produces a warning rather than a silent correction.
 (function (C) {
   "use strict";
 
@@ -21,10 +25,14 @@
     return { id, name: id === "A" ? "Main face" : "", width: null, height: null, thickness: null, attach, features: [] };
   };
 
-  C.newAttach = (parent) => ({ parent, edge: "top", offset: 0, angle: 90, toward: "back" });
+  // How a panel joins another: which panel and side, where the bend line is (measured from an
+  // edge of the other panel, because cutouts can move the material edge in from the outline),
+  // where along that side this panel starts, and the bend.
+  C.newAttach = () => ({ parent: null, edge: null, line: { ref: null, value: null }, offset: null, angle: null, toward: null });
 
   // Positions are measured from a panel edge. Holes can be measured to their center or to the
   // near side of the hole (what calipers can actually touch); cutouts are measured to their near edge.
+  // The ref/to selectors start on the recommended way of measuring; they are shown next to the value.
   C.newHole = () => ({
     type: "hole",
     diameter: null,
@@ -46,20 +54,27 @@
     type: "slot",
     width: null,
     length: null,
-    orient: "h",
-    open: false,
+    orient: null,
+    open: null,
     x: { ref: "left", value: null, to: "near" },
     y: { ref: "bottom", value: null, to: "near" },
   });
 
   // Angled edge: a straight cut between two points, each located from the panel edges. Material
-  // beyond the line on the chosen side is removed. A corner chamfer has one end on each edge.
+  // beyond the line on the chosen side is removed.
   C.newAngle = () => ({
     type: "angle",
-    toward: "bottom-left",
-    p1: { x: { ref: "left", value: null }, y: { ref: "bottom", value: 0 } },
-    p2: { x: { ref: "left", value: 0 }, y: { ref: "bottom", value: null } },
+    toward: null,
+    p1: { x: { ref: "left", value: null }, y: { ref: "bottom", value: null } },
+    p2: { x: { ref: "left", value: null }, y: { ref: "bottom", value: null } },
   });
+
+  // Brings documents saved by older versions up to date. Values that didn't exist then are left
+  // unmeasured (the walkthrough asks for them), never filled in with a guess.
+  C.upgradeDoc = function (doc) {
+    for (const p of doc.panels) if (p.attach && !p.attach.line) p.attach.line = { ref: null, value: null };
+    return doc;
+  };
 
   C.TOWARD = { "bottom-left": [-1, -1], "bottom-right": [1, -1], "top-left": [-1, 1], "top-right": [1, 1] };
 
@@ -83,12 +98,17 @@
   };
 
   const num = (v) => typeof v === "number" && isFinite(v);
+  const chosen = (v) => v !== null && v !== undefined && v !== "";
   C.panelComplete = (p) => num(p.width) && p.width > 0 && num(p.height) && p.height > 0;
 
-  // Every value a feature needs, in the order the user should measure them.
-  // kind "size" must be > 0, kind "pos" may be any number. path is relative to the feature.
+  // kind "size" must be > 0, "pos" may be any number, "choice" must be picked.
+  const fieldOk = (r) => (r.kind === "choice" ? chosen(r.v) : num(r.v) && (r.kind === "pos" || r.v > 0));
+
+  // Every value a feature needs, in the order the user should measure them. path is relative to
+  // the feature.
   C.requiredFields = function (f, n, P) {
     const size = (path, v, text) => ({ path, v, kind: "size", text });
+    const choice = (path, v, text) => ({ path, v, kind: "choice", text });
     const pos = (ax, what) => ({
       path: `${ax}.value`, v: f[ax].value, kind: "pos",
       text: `measure from the ${f[ax].ref} edge of ${P} to the ${what} (${n}).`,
@@ -109,8 +129,14 @@
           pos("y", "nearest edge of the cutout"),
         ];
       case "slot": {
+        const kind = [
+          choice("orient", f.orient, `choose whether ${n} runs horizontally or vertically.`),
+          choice("open", f.open, `choose whether ${n} is closed or open to an edge (U-slot).`),
+        ];
+        if (!chosen(f.orient) || !chosen(f.open)) return kind; // positions depend on these
         const along = f.orient === "h" ? "x" : "y", across = f.orient === "h" ? "y" : "x";
         return [
+          ...kind,
           size("width", f.width, `measure the width of ${n}.`),
           size("length", f.length, f.open
             ? `measure the depth of ${n}, from the ${f[along].ref} edge to the far end of the slot.`
@@ -120,16 +146,40 @@
         ];
       }
       case "angle":
-        return ["p1", "p2"].flatMap((k, i) => ["x", "y"].map((ax) => ({
-          path: `${k}.${ax}.value`, v: f[k][ax].value, kind: "pos",
-          text: `measure end ${i + 1} of ${n}: distance from the ${f[k][ax].ref} edge of ${P}.`,
-        })));
+        return [
+          choice("toward", f.toward, `choose which side ${n} cuts off.`),
+          ...["p1", "p2"].flatMap((k, i) => ["x", "y"].map((ax) => ({
+            path: `${k}.${ax}.value`, v: f[k][ax].value, kind: "pos",
+            text: `measure end ${i + 1} of ${n}: distance from the ${f[k][ax].ref} edge of ${P}.`,
+          }))),
+        ];
     }
     return [];
   };
 
-  const fieldOk = (r) => num(r.v) && (r.kind === "pos" || r.v > 0);
   C.featureComplete = (f) => C.requiredFields(f, "", "").every(fieldOk);
+
+  // Everything a joint needs, in walkthrough order. path is relative to the panel.
+  C.attachFields = function (p, P) {
+    const a = p.attach, other = a.parent || "the other panel";
+    return [
+      { path: "attach.parent", v: a.parent, kind: "choice", text: `choose which panel ${P} is joined to.` },
+      { path: "attach.edge", v: a.edge, kind: "choice", text: `choose which side of ${other} ${P} is joined along.` },
+      { path: "attach.line.ref", v: a.line.ref, kind: "choice", text: `choose which edge of ${other} the bend line of ${P} is measured from.` },
+      {
+        path: "attach.line.value", v: a.line.value, kind: "pos",
+        text: `measure where the bend line of ${P} is: distance from ${other}'s ${a.line.ref || "chosen"} edge (0 if it bends right at that edge).`,
+      },
+      {
+        path: "attach.offset", v: a.offset, kind: "pos",
+        text: `measure where ${P} starts along ${other}'s ${a.edge || "chosen"} side, from its ${a.edge ? C.edgeStartName(a.edge) : "starting"} end.`,
+      },
+      { path: "attach.angle", v: a.angle, kind: "pos", text: `enter the bend angle of ${P} (90 for a right angle, 0 for flat).` },
+      { path: "attach.toward", v: a.toward, kind: "choice", text: `choose whether ${P} bends toward the front or the back of ${other}.` },
+    ];
+  };
+
+  C.attachComplete = (p) => !!p.attach && C.attachFields(p, "").every(fieldOk);
 
   const place = (d, a, size, low) => (a.ref === low ? d : size - d);
 
@@ -225,45 +275,93 @@
   const scale = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
   C.vec = { cross, add, scale, dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2] };
 
-  // For each parent edge: start point (where the offset is measured from), direction along the
-  // edge (u), and outward in-plane normal (n). A joined panel's own x axis runs along u and its
-  // y axis starts out along n, so its joined edge is its bottom edge.
+  // For each parent side: direction along it (u, the way the offset is measured) and outward
+  // in-plane normal (n). A joined panel's own x axis runs along u and its y axis starts out along
+  // n, so its joined edge is its bottom edge.
   C.edgeBasis = function (edge, W, H) {
     const b = {
-      bottom: { start: [0, 0, 0], u: [1, 0, 0], n: [0, -1, 0] },
-      top: { start: [0, H, 0], u: [1, 0, 0], n: [0, 1, 0] },
-      left: { start: [0, 0, 0], u: [0, 1, 0], n: [-1, 0, 0] },
-      right: { start: [W, 0, 0], u: [0, 1, 0], n: [1, 0, 0] },
+      bottom: { u: [1, 0, 0], n: [0, -1, 0] },
+      top: { u: [1, 0, 0], n: [0, 1, 0] },
+      left: { u: [0, 1, 0], n: [-1, 0, 0] },
+      right: { u: [0, 1, 0], n: [1, 0, 0] },
     }[edge];
     return { ...b, z0: cross(b.u, b.n), length: edge === "top" || edge === "bottom" ? W : H };
   };
 
   C.edgeStartName = (edge) => (edge === "top" || edge === "bottom" ? "left" : "bottom");
+  // Edges a bend line can be measured from: the two parallel to the joined side.
+  C.bendRefs = (edge) => (edge === "top" || edge === "bottom" ? ["bottom", "top"] : ["left", "right"]);
+
+  // The bend line, in the parent's coordinates: x for a left/right side, y for a top/bottom side.
+  C.bendCoord = function (parent, a) {
+    const size = a.edge === "top" || a.edge === "bottom" ? parent.height : parent.width;
+    return a.line.ref === "left" || a.line.ref === "bottom" ? a.line.value : size - a.line.value;
+  };
+
+  // How much of the joined panel's width actually sits on an edge of the parent's material along
+  // the bend line the user gave. A bent face is one piece with its parent, so the bend has to be
+  // on a material edge with the material on the inner side; anything less is reported, not fixed.
+  C.jointCoverage = function (parent, p) {
+    const a = p.attach, e = C.edgeBasis(a.edge, parent.width, parent.height);
+    const lo = a.offset, hi = lo + p.width, k = C.bendCoord(parent, a);
+    const vertical = a.edge === "left" || a.edge === "right";
+    const along = (q) => (vertical ? q[1] : q[0]);
+    const across = (q) => (vertical ? q[0] : q[1]);
+    const { outer, cutters, pieces } = C.panelGeometry(parent);
+    const solid = (q, s) => C.inMaterial(outer, cutters, [q[0] - e.n[0] * s, q[1] - e.n[1] * s]);
+    let overlap = 0;
+    for (const pc of pieces) {
+      if (pc.t !== "line" || Math.abs(across(pc.a) - k) > 1e-6 || Math.abs(across(pc.b) - k) > 1e-6) continue;
+      const mid = [(pc.a[0] + pc.b[0]) / 2, (pc.a[1] + pc.b[1]) / 2];
+      if (!solid(mid, 1e-3) || solid(mid, -1e-3)) continue; // material inside, air outside
+      overlap += Math.max(0, Math.min(hi, Math.max(along(pc.a), along(pc.b))) - Math.max(lo, Math.min(along(pc.a), along(pc.b))));
+    }
+    return { overlap, covered: overlap >= p.width - 1e-6 };
+  };
 
   // Child frame expressed in the parent's coordinates.
-  function localFrame(parent, a) {
-    const e = C.edgeBasis(a.edge, parent.width, parent.height);
-    const phi = (((a.angle || 0) * Math.PI) / 180) * (a.toward === "front" ? 1 : -1) * e.z0[2];
+  // Panels are plates with thickness, and every size is an outside dimension, as calipers measure
+  // a bent part: the bend line is the outside edge of the parent's material, and a joined face is
+  // measured from the outside of the bend. So the joined plate starts at the outside corner (on the
+  // parent's face opposite the bend direction) and its thickness lies inside the bend, overlapping
+  // the parent there. The two plates then form one solid corner instead of touching along a line.
+  //
+  // Each frame carries tdir: which way along its z axis the plate's thickness runs from the
+  // frame's surface (+1: z in [0, t], -1: z in [-t, 0]). z itself stays x × y, so "front" of a
+  // panel always means the side you see in its flat drawing.
+  C.tdirOf = (e, a) => e.z0[2] * (a.toward === "front" ? 1 : -1);
+
+  function localFrame(parent, parentTdir, child) {
+    const a = child.attach, e = C.edgeBasis(a.edge, parent.width, parent.height);
+    const k = C.bendCoord(parent, a), s = a.toward === "front" ? 1 : -1;
+    const [lo, hi] = parentTdir > 0 ? [0, parent.thickness] : [-parent.thickness, 0];
+    const zOuter = s < 0 ? hi : lo; // the parent's face on the outside of the bend
+    const start = a.edge === "left" || a.edge === "right" ? [k, 0, zOuter] : [0, k, zOuter];
+    const phi = ((a.angle * Math.PI) / 180) * s * e.z0[2];
     const y = add(scale(e.n, Math.cos(phi)), scale(e.z0, Math.sin(phi)));
-    return { o: add(e.start, scale(e.u, a.offset || 0)), x: e.u, y, z: cross(e.u, y) };
+    return { o: add(start, scale(e.u, a.offset)), x: e.u, y, z: cross(e.u, y), tdir: parentTdir * C.tdirOf(e, a) };
   }
 
   const toWorld = (F, v) => add(F.o, add(scale(F.x, v[0]), add(scale(F.y, v[1]), scale(F.z, v[2]))));
   const dirWorld = (F, v) => add(scale(F.x, v[0]), add(scale(F.y, v[1]), scale(F.z, v[2])));
 
-  // World frames (root panel = world) for every panel whose whole chain is measured.
+  // World frames (root panel = world) for every panel whose whole chain is measured. Placing a
+  // joined face needs its parent's thickness, so nothing is placed until thicknesses are measured.
+  const placeable = (p) => C.panelComplete(p) && p.thickness > 0;
+
   C.panelFrames = function (doc) {
     const frames = new Map();
     const visit = (p, F) => {
       frames.set(p.id, F);
       for (const ch of doc.panels) {
-        if (!ch.attach || ch.attach.parent !== p.id || !C.panelComplete(ch) || frames.has(ch.id)) continue;
-        const L = localFrame(p, ch.attach);
-        visit(ch, { o: toWorld(F, L.o), x: dirWorld(F, L.x), y: dirWorld(F, L.y), z: dirWorld(F, L.z) });
+        if (!ch.attach || ch.attach.parent !== p.id || frames.has(ch.id)) continue;
+        if (!placeable(ch) || !C.attachComplete(ch)) continue;
+        const L = localFrame(p, F.tdir, ch);
+        visit(ch, { o: toWorld(F, L.o), x: dirWorld(F, L.x), y: dirWorld(F, L.y), z: dirWorld(F, L.z), tdir: L.tdir });
       }
     };
     for (const p of doc.panels)
-      if (!p.attach && C.panelComplete(p)) visit(p, { o: [0, 0, 0], x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] });
+      if (!p.attach && placeable(p)) visit(p, { o: [0, 0, 0], x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1], tdir: 1 });
     return frames;
   };
   C.toWorld = toWorld;
@@ -279,17 +377,27 @@
         out.push(`${tag}: needs a width and height before it can be drawn.`);
         continue;
       }
+      if (!(p.thickness > 0)) out.push(`${tag}: thickness not measured yet.`);
       if (p.attach) {
-        const parent = C.findPanel(doc, p.attach.parent);
-        if (!parent) out.push(`${tag}: the panel it is joined to no longer exists.`);
+        const parent = p.attach.parent && C.findPanel(doc, p.attach.parent);
+        if (!C.attachComplete(p)) out.push(`${tag}: how it joins the other panel isn't fully entered yet, so it isn't placed in 3D.`);
+        else if (!parent) out.push(`${tag}: the panel it is joined to no longer exists.`);
         else if (C.panelComplete(parent)) {
-          const len = C.edgeBasis(p.attach.edge, parent.width, parent.height).length;
-          const off = p.attach.offset || 0;
-          if (off < -EPS || off + p.width > len + EPS)
-            out.push(
-              `${tag} is ${F(p.width)} wide starting ${F(off)} along ${parent.id}'s ${p.attach.edge} edge, ` +
-                `but that edge is only ${F(len)} long.`
-            );
+          const a = p.attach;
+          const len = C.edgeBasis(a.edge, parent.width, parent.height).length;
+          const bendSize = a.edge === "top" || a.edge === "bottom" ? parent.height : parent.width;
+          const where = `${F(a.line.value)} from ${parent.id}'s ${a.line.ref} edge`;
+          if (a.offset < -EPS || a.offset + p.width > len + EPS)
+            out.push(`${tag} is ${F(p.width)} wide starting ${F(a.offset)} along ${parent.id}'s ${a.edge} side, but that side is only ${F(len)} long.`);
+          else if (a.line.value < -EPS || a.line.value > bendSize + EPS)
+            out.push(`${tag}: its bend line (${where}) is outside ${parent.id}.`);
+          else {
+            const c = C.jointCoverage(parent, p);
+            if (c.overlap < EPS)
+              out.push(`${tag}: its bend line (${where}) doesn't run along an edge of ${parent.id}'s material. A bent face has to start at an edge: check the bend line position and the cutouts.`);
+            else if (!c.covered)
+              out.push(`${tag}: only ${F(c.overlap)} of its ${F(p.width)} width meets ${parent.id}'s material along the bend line (${where}). Check its width, its starting position and the cutouts.`);
+          }
         }
       }
       p.features.forEach((f, j) => {
@@ -341,6 +449,10 @@
       if (!(p.width > 0)) return { path: `p${i}.width`, text: `measure the width of ${P} (left edge to right edge).` };
       if (!(p.height > 0)) return { path: `p${i}.height`, text: `measure the height of ${P} (bottom edge to top edge).` };
       if (!(p.thickness > 0)) return { path: `p${i}.thickness`, text: `measure the thickness of ${P}.` };
+      if (p.attach) {
+        const missing = C.attachFields(p, P).find((r) => !fieldOk(r));
+        if (missing) return { path: `p${i}.${missing.path}`, text: missing.text };
+      }
       for (const [j, f] of p.features.entries()) {
         const missing = C.requiredFields(f, `${FEATURE_NAME[f.type]} ${j + 1} on ${P}`, P).find((r) => !fieldOk(r));
         if (missing) return { path: `p${i}.f${j}.${missing.path}`, text: missing.text };

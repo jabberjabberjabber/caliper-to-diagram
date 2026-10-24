@@ -31,14 +31,16 @@
 
   // physical: true sizes the SVG in real millimeters so it prints 1:1.
   // highlight: tag of the form section being edited; its primitives are drawn in color, on top.
-  C.toSVG = function (sheet, { physical, highlight } = {}) {
+  // interactive: mark numbers that link to measurements so the preview can edit them.
+  // SVG user units are sheet millimeters (y flipped), so a zoomed view stays put across redraws.
+  C.toSVG = function (sheet, { physical, highlight, interactive } = {}) {
     const { minX, minY, maxX, maxY } = sheet.bbox;
     const W = r3(maxX - minX), H = r3(maxY - minY);
-    const X = (x) => r3(x - minX), Y = (y) => r3(maxY - y);
+    const X = (x) => r3(x), Y = (y) => r3(-y);
     const uid = Math.random().toString(36).slice(2, 8);
     let masks = 0;
     const pts = (l) => l.map((q) => `${X(q[0])},${Y(q[1])}`);
-    const size = physical ? `width="${W}mm" height="${H}mm"` : `width="100%"`;
+    const size = physical ? `width="${W}mm" height="${H}mm"` : `width="100%" height="100%"`;
     const render = (p) => {
       const hl = C.tagMatches(p.tags, highlight);
       const st = (name, fallback) => {
@@ -77,7 +79,8 @@
         }
         case "text": {
           const rot = p.rot ? ` transform="rotate(${-p.rot} ${X(p.x)} ${Y(p.y)})"` : "";
-          return `<text x="${X(p.x)}" y="${Y(p.y)}" font-size="${p.h}" text-anchor="${p.anchor}"${rot}${hl ? ` fill="${HL}"` : ""}>${esc(p.s)}</text>`;
+          const link = interactive && p.edits ? ` class="editable" data-edits="${esc(JSON.stringify(p.edits))}"` : "";
+          return `<text x="${X(p.x)}" y="${Y(p.y)}" font-size="${p.h}" text-anchor="${p.anchor}"${rot}${hl ? ` fill="${HL}"` : ""}${link}>${esc(p.s)}</text>`;
         }
       }
       return "";
@@ -87,8 +90,8 @@
     const lifted = (p) => p.t !== "region" && C.tagMatches(p.tags, highlight);
     const body = [...sheet.prims.filter((p) => !lifted(p)), ...sheet.prims.filter(lifted)].map(render);
     return (
-      `<svg xmlns="http://www.w3.org/2000/svg" ${size} viewBox="0 0 ${W} ${H}">` +
-      `<rect width="${W}" height="${H}" fill="#fff"/>` +
+      `<svg xmlns="http://www.w3.org/2000/svg" ${size} viewBox="${X(minX)} ${Y(maxY)} ${W} ${H}">` +
+      `<rect x="${X(minX)}" y="${Y(maxY)}" width="${W}" height="${H}" fill="#fff"/>` +
       `<g font-family="Arial, Helvetica, sans-serif" fill="#000" stroke-linecap="round">${body.join("")}</g></svg>`
     );
   };
@@ -159,18 +162,29 @@
     const v = (x) => String(Math.round(x * 10000) / 10000);
     const frames = C.panelFrames(doc);
     const panels = doc.panels.filter((p) => frames.has(p.id));
+    // A 3D model with a panel silently missing, or a made-up thickness, is worse than none: refuse.
+    const missing = doc.panels.filter((p) => !frames.has(p.id));
+    if (missing.length) {
+      const why = (p) =>
+        !C.panelComplete(p) ? `the width and height of panel ${p.id}`
+        : !(p.thickness > 0) ? `the thickness of panel ${p.id}`
+        : `how panel ${p.id} joins its parent (and everything it hangs from)`;
+      throw new Error(`measure ${missing.map(why).join("; ")} first.`);
+    }
     const vars = [], modules = [], helpers = new Set();
 
     for (const p of panels) {
-      const id = p.id, t = p.thickness > 0 ? p.thickness : 1, W = `${id}_width`, H = `${id}_height`, T = `${id}_thick`;
+      const id = p.id, W = `${id}_width`, H = `${id}_height`, T = `${id}_thick`;
       // from(d, ref, size, low): coordinate of a distance d measured from edge `ref`.
       const from = (d, ref, size, low) => (ref === low ? `${d}` : `${size} - (${d})`);
       vars.push(`/* [Panel ${id}${p.name ? ": " + p.name : ""}] */`);
       vars.push(`${W} = ${v(p.width)};`, `${H} = ${v(p.height)};`);
-      vars.push(`${T} = ${v(t)};${p.thickness > 0 ? "" : " // not measured, placeholder"}`);
+      vars.push(`${T} = ${v(p.thickness)};`);
       if (p.attach) {
-        vars.push(`${id}_offset = ${v(p.attach.offset || 0)}; // along ${p.attach.parent}'s ${p.attach.edge} edge from its ${C.edgeStartName(p.attach.edge)} end`);
-        vars.push(`${id}_angle = ${v(p.attach.angle || 0)}; // bend from flat, toward the ${p.attach.toward} of ${p.attach.parent}`);
+        const a = p.attach;
+        vars.push(`${id}_bend = ${v(a.line.value)}; // bend line: distance from ${a.parent}'s ${a.line.ref} edge`);
+        vars.push(`${id}_offset = ${v(a.offset)}; // along ${a.parent}'s ${a.edge} side from its ${C.edgeStartName(a.edge)} end`);
+        vars.push(`${id}_angle = ${v(a.angle)}; // bend from flat, toward the ${a.toward} of ${a.parent}`);
       }
       const cuts = [], count = {};
       const cyl = (x, y, d) => `translate([${x}, ${y}, -1]) cylinder(d = ${d}, h = ${T} + 2);`;
@@ -248,27 +262,28 @@
       ...modules,
     ];
 
-    const place = (p, indent) => {
+    // tdir: which way the plate's thickness runs from its frame (see localFrame in model.js).
+    const place = (p, indent, tdir) => {
       const pad = "  ".repeat(indent);
-      L.push(`${pad}panel_${p.id}();`);
+      L.push(tdir > 0 ? `${pad}panel_${p.id}();` : `${pad}translate([0, 0, -${p.id}_thick]) panel_${p.id}();`);
       for (const ch of panels.filter((q) => q.attach && q.attach.parent === p.id)) {
         const a = ch.attach, e = C.edgeBasis(a.edge, 0, 0), off = `${ch.id}_offset`;
-        const tr = {
-          bottom: `[${off}, 0, 0]`,
-          top: `[${off}, ${p.id}_height, 0]`,
-          left: `[0, ${off}, 0]`,
-          right: `[${p.id}_width, ${off}, 0]`,
-        }[a.edge];
+        // Start at the parent's face on the outside of the bend, so the plates form a solid corner.
+        const zOuter = (a.toward === "front") === tdir > 0 ? "0" : tdir > 0 ? `${p.id}_thick` : `-${p.id}_thick`;
+        // Bend line coordinate across the parent, from the edge it was measured from.
+        const size = a.edge === "left" || a.edge === "right" ? `${p.id}_width` : `${p.id}_height`;
+        const bend = a.line.ref === "left" || a.line.ref === "bottom" ? `${ch.id}_bend` : `${size} - ${ch.id}_bend`;
+        const tr = a.edge === "left" || a.edge === "right" ? `[${bend}, ${off}, ${zOuter}]` : `[${off}, ${bend}, ${zOuter}]`;
         const m = [0, 1, 2].map((i) => `[${e.u[i]}, ${e.n[i]}, ${e.z0[i]}, 0]`).join(", ");
         const sign = (a.toward === "front" ? 1 : -1) * e.z0[2] < 0 ? "-" : "";
         L.push(`${pad}translate(${tr}) multmatrix([${m}, [0, 0, 0, 1]]) rotate([${sign}${ch.id}_angle, 0, 0]) {`);
-        place(ch, indent + 1);
+        place(ch, indent + 1, tdir * C.tdirOf(e, a));
         L.push(`${pad}}`);
       }
     };
     if (panels.length) {
       L.push("// ---- Assembly", "module part() {");
-      for (const root of panels.filter((p) => !p.attach)) place(root, 1);
+      for (const root of panels.filter((p) => !p.attach)) place(root, 1, 1);
       L.push("}", "", "part();");
     }
     return L.join("\n") + "\n";

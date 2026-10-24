@@ -20,12 +20,19 @@
 
   // Tags tie primitives to the form section they come from ("p0.width", "p0.f3", "p1.attach"), so
   // the preview can color whatever is being edited. Set around each section while drawing it.
-  let curTags = null;
-  const tagged = (o) => (curTags ? { ...o, tags: curTags } : o);
-  function withTags(tags, fn) {
-    const prev = curTags;
+  // Text can also carry edits: the measurements behind it, so clicking a number on the preview
+  // edits the value that produced it.
+  let curTags = null, curEdits = null;
+  const tagged = (o) => {
+    if (curTags) o = { ...o, tags: curTags };
+    if (curEdits && o.t === "text") o = { ...o, edits: curEdits };
+    return o;
+  };
+  function withTags(tags, fn, edits) {
+    const prev = [curTags, curEdits];
     curTags = tags;
-    try { fn(); } finally { curTags = prev; }
+    curEdits = edits || null;
+    try { fn(); } finally { [curTags, curEdits] = prev; }
   }
 
   const line = (out, x1, y1, x2, y2, style, layer) => out.push(tagged({ t: "line", x1, y1, x2, y2, style, layer }));
@@ -111,12 +118,13 @@
       if (prev) {
         prev.sb = Math.min(prev.sb, d.sb);
         prev.tags = [...prev.tags, ...d.tags]; // one dimension can serve several features
+        prev.edits = [...prev.edits, ...d.edits];
       } else seen.set(k, { ...d });
     }
     [...seen.values()]
       .sort((p, q) => Math.abs(p.b - p.a) - Math.abs(q.b - q.a))
       .forEach((d, i) =>
-        withTags(d.tags, () => dim(out, axis, d.a, d.b, d.sa, d.sb, -(ROW0 + i * ROW), F(Math.abs(d.b - d.a))))
+        withTags(d.tags, () => dim(out, axis, d.a, d.b, d.sa, d.sb, -(ROW0 + i * ROW), F(Math.abs(d.b - d.a))), d.edits)
       );
   }
 
@@ -147,10 +155,15 @@
     out.push({ t: "region", outer: g.outer.pts, cutters: g.cutters.map((s) => C.shapePolygon(s)), style: "part", layer: "OUTLINE" });
     outlinePrims(out, g.pieces, "OUTLINE");
 
+    // Edit links: the measured value behind a number on the drawing, so clicking the number edits
+    // the measurement itself. kind "len" is a length, "num" a plain number (angles).
+    const E = (path, label, kind = "len") => ({ path, label, kind });
+    const pathOf = (j, rest) => `${P}.f${j}.${rest}`;
+
     // Dimensions are collected per axis and laid out by stack(): from ref edge (a) to feature (b);
     // sa/sb are where the extension lines start; tags say which form section each belongs to.
-    const xd = [{ a: 0, b: W, sa: 0, sb: 0, tags: [`${P}.width`] }];
-    const yd = [{ a: 0, b: H, sa: 0, sb: 0, tags: [`${P}.height`] }];
+    const xd = [{ a: 0, b: W, sa: 0, sb: 0, tags: [`${P}.width`], edits: [E(`${P}.width`, `${p.id} · width`)] }];
+    const yd = [{ a: 0, b: H, sa: 0, sb: 0, tags: [`${P}.height`], edits: [E(`${P}.height`, `${p.id} · height`)] }];
     const xFrom = (ref) => (ref === "left" ? 0 : W), yFrom = (ref) => (ref === "bottom" ? 0 : H);
     const groups = new Map(); // identical holes / slots share one callout: "4X Ø3.20 THRU"
     const sideLabels = []; // labels that don't fit next to their feature
@@ -158,13 +171,17 @@
     p.features.forEach((f, j) => {
       if (!C.featureComplete(f)) return;
       const tags = [`${P}.f${j}`];
-      const xdim = (d) => xd.push({ ...d, sa: 0, tags });
-      const ydim = (d) => yd.push({ ...d, sa: 0, tags });
-      const group = (key, s, v) => {
-        if (!groups.has(key)) groups.set(key, { s, v, n: 0, tags: [] });
+      const name = `${p.id} · ${{ hole: "hole", cutout: "cutout", slot: "slot", angle: "angled edge" }[f.type]} ${j + 1}`;
+      const toWhat = (a, what) => (a.to === "near" ? `near side of ${what}` : `${what} center`);
+      const posEdit = (ax, what) => E(pathOf(j, `${ax}.value`), `${name} · from ${f[ax].ref} edge to ${what}`);
+      const xdim = (d, edit) => xd.push({ ...d, sa: 0, tags, edits: [edit] });
+      const ydim = (d, edit) => yd.push({ ...d, sa: 0, tags, edits: [edit] });
+      const group = (key, s, v, edits) => {
+        if (!groups.has(key)) groups.set(key, { s, v, n: 0, tags: [], edits: [] });
         const gr = groups.get(key);
         gr.n++;
         gr.tags.push(...tags);
+        gr.edits.push(...edits);
       };
       // Outline of just this feature, shown only while it is being edited.
       const hilite = (pts, closed = true) => out.push({ t: "poly", pts, closed, style: "hilite", layer: "HILITE", tags });
@@ -175,18 +192,19 @@
           hilite(C.shapePolygon({ kind: "circle", c: [c.x, c.y], r }));
           line(out, c.x - e, c.y, c.x + e, c.y, "center", "CENTER");
           line(out, c.x, c.y - e, c.x, c.y + e, "center", "CENTER");
-          xdim({ a: xFrom(f.x.ref), b: c.x, sb: c.y - e });
-          ydim({ a: yFrom(f.y.ref), b: c.y, sb: c.x - e });
-          group(`Ø${F(f.diameter)} THRU`, [c.x + r * K, c.y + r * K], [K, K]);
+          xdim({ a: xFrom(f.x.ref), b: c.x, sb: c.y - e }, posEdit("x", toWhat(f.x, "hole")));
+          ydim({ a: yFrom(f.y.ref), b: c.y, sb: c.x - e }, posEdit("y", toWhat(f.y, "hole")));
+          group(`Ø${F(f.diameter)} THRU`, [c.x + r * K, c.y + r * K], [K, K], [E(pathOf(j, "diameter"), `${name} · diameter`)]);
         } else if (f.type === "cutout") {
           const r = C.cutoutRect(p, f);
           hilite([[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]]);
-          xdim({ a: xFrom(f.x.ref), b: f.x.ref === "left" ? r.x0 : r.x1, sb: Math.max(r.y0, 0) });
-          ydim({ a: yFrom(f.y.ref), b: f.y.ref === "bottom" ? r.y0 : r.y1, sb: Math.max(r.x0, 0) });
+          xdim({ a: xFrom(f.x.ref), b: f.x.ref === "left" ? r.x0 : r.x1, sb: Math.max(r.y0, 0) }, posEdit("x", "near edge of cutout"));
+          ydim({ a: yFrom(f.y.ref), b: f.y.ref === "bottom" ? r.y0 : r.y1, sb: Math.max(r.x0, 0) }, posEdit("y", "near edge of cutout"));
           const s = `${F(f.width)} × ${F(f.height)}`, my = (r.y0 + r.y1) / 2;
+          const edits = [E(pathOf(j, "width"), `${name} · width`), E(pathOf(j, "height"), `${name} · height`)];
           if (C.textWidth(s, TXT) + 2 < f.width && TXT + 2 < f.height)
-            text(out, (r.x0 + r.x1) / 2, my - TXT * 0.35, s, TXT, { anchor: "middle", layer: "DIMS" });
-          else sideLabels.push({ s, px: (Math.max(r.x0, 0) + Math.min(r.x1, W)) / 2, py: my, tags });
+            withTags(tags, () => text(out, (r.x0 + r.x1) / 2, my - TXT * 0.35, s, TXT, { anchor: "middle", layer: "DIMS" }), edits);
+          else sideLabels.push({ s, px: (Math.max(r.x0, 0) + Math.min(r.x1, W)) / 2, py: my, tags, edits });
         } else if (f.type === "slot") {
           const s = C.slotGeom(p, f), h = f.orient === "h", r = s.r, e = r + 1.5;
           hilite(C.shapePolygon({ kind: "stadium", a: s.a, b: s.b, r }));
@@ -197,35 +215,46 @@
           for (const c of f.open ? [s.b] : [s.a, s.b])
             line(out, c[0] - u[1] * e, c[1] + u[0] * e, c[0] + u[1] * e, c[1] - u[0] * e, "center", "CENTER");
           const low = (k) => Math.max(Math.min(s.a[k], s.b[k]) - r, 0);
+          const along = h ? "x" : "y", across = h ? "y" : "x";
+          const alongEdit = f.open
+            ? E(pathOf(j, "length"), `${name} · depth from ${f[along].ref} edge`)
+            : posEdit(along, f[along].to === "near" ? "near end of slot" : "slot center");
+          const acrossEdit = posEdit(across, toWhat(f[across], "slot"));
           if (h) {
-            xdim({ a: xFrom(f.x.ref), b: s.alongDim, sb: low(1) });
-            ydim({ a: yFrom(f.y.ref), b: s.across, sb: low(0) });
+            xdim({ a: xFrom(f.x.ref), b: s.alongDim, sb: low(1) }, alongEdit);
+            ydim({ a: yFrom(f.y.ref), b: s.across, sb: low(0) }, acrossEdit);
           } else {
-            xdim({ a: xFrom(f.x.ref), b: s.across, sb: low(1) });
-            ydim({ a: yFrom(f.y.ref), b: s.alongDim, sb: low(0) });
+            xdim({ a: xFrom(f.x.ref), b: s.across, sb: low(1) }, acrossEdit);
+            ydim({ a: yFrom(f.y.ref), b: s.alongDim, sb: low(0) }, alongEdit);
           }
+          const sizeEdits = [E(pathOf(j, "width"), `${name} · width`)];
           if (f.open) {
             // Label right of the panel, with a leader to the far, rounded end of the U.
             let v = [u[0] * K + u[1] * K, -u[0] * K + u[1] * K];
             if (v[0] < 0) v = [u[0] * K - u[1] * K, u[0] * K + u[1] * K];
-            sideLabels.push({ s: `OPEN SLOT ${F(f.width)} WIDE`, px: s.b[0] + v[0] * r, py: s.b[1] + v[1] * r, tags });
+            sideLabels.push({ s: `OPEN SLOT ${F(f.width)} WIDE`, px: s.b[0] + v[0] * r, py: s.b[1] + v[1] * r, tags, edits: sizeEdits });
           } else {
             const end = s.b[0] + s.b[1] >= s.a[0] + s.a[1] ? s.b : s.a;
-            group(`SLOT ${F(f.width)} × ${F(f.length)}`, [end[0] + r * K, end[1] + r * K], [K, K]);
+            sizeEdits.push(E(pathOf(j, "length"), `${name} · overall length`));
+            group(`SLOT ${F(f.width)} × ${F(f.length)}`, [end[0] + r * K, end[1] + r * K], [K, K], sizeEdits);
           }
         } else if (f.type === "angle") {
           const [p1, p2] = C.anglePoints(p, f), n = C.angleNormal(p, f);
           hilite([p1, p2], false);
-          for (const [q, pt] of [[f.p1, p1], [f.p2, p2]]) {
-            xdim({ a: xFrom(q.x.ref), b: pt[0], sb: pt[1] });
-            ydim({ a: yFrom(q.y.ref), b: pt[1], sb: pt[0] });
-          }
+          const ends = [["p1", f.p1, p1], ["p2", f.p2, p2]];
+          const endEdit = (k, q, ax, i) => E(pathOf(j, `${k}.${ax}.value`), `${name} · end ${i + 1} from ${q[ax].ref} edge`);
+          ends.forEach(([k, q, pt], i) => {
+            xdim({ a: xFrom(q.x.ref), b: pt[0], sb: pt[1] }, endEdit(k, q, "x", i));
+            ydim({ a: yFrom(q.y.ref), b: pt[1], sb: pt[0] }, endEdit(k, q, "y", i));
+          });
           if (n) {
-            // The angle follows from the two measured ends, so it is a reference dimension (in parentheses).
+            // The angle follows from the two measured ends, so it is a reference dimension (in
+            // parentheses). Clicking it edits those ends.
             const deg = (Math.atan2(Math.abs(p2[1] - p1[1]), Math.abs(p2[0] - p1[0])) * 180) / Math.PI;
             const m = [(p1[0] + p2[0]) / 2 + n[0] * 3, (p1[1] + p2[1]) / 2 + n[1] * 3];
             const anchor = n[0] < -0.3 ? "end" : n[0] > 0.3 ? "start" : "middle";
-            text(out, m[0], m[1] - TXT * 0.35, `(${deg.toFixed(1)}°)`, TXT, { anchor, layer: "DIMS" });
+            const edits = ends.flatMap(([k, q], i) => ["x", "y"].map((ax) => endEdit(k, q, ax, i)));
+            withTags(tags, () => text(out, m[0], m[1] - TXT * 0.35, `(${deg.toFixed(1)}°)`, TXT, { anchor, layer: "DIMS" }), edits);
           }
         }
       });
@@ -240,43 +269,55 @@
         line(out, l.px, l.py, W + 4, y, "thin", "DIMS");
         line(out, W + 4, y, W + 6, y, "thin", "DIMS");
         text(out, W + 6.5, y - TXT * 0.35, l.s, TXT, { layer: "DIMS" });
-      });
+      }, l.edits);
+    }
+
+    // Bend lines of joined faces, dimensioned from the edge the user measured them from.
+    for (const ch of children) {
+      const a = ch.attach, k = C.bendCoord(p, a), CP = `p${doc.panels.indexOf(ch)}`;
+      const d = { b: k, sa: 0, sb: a.offset, tags: [`${CP}.attach`], edits: [E(`${CP}.attach.line.value`, `${ch.id} · bend line from ${p.id}'s ${a.line.ref} edge`)] };
+      if (a.edge === "left" || a.edge === "right") xd.push({ ...d, a: a.line.ref === "left" ? 0 : W });
+      else yd.push({ ...d, a: a.line.ref === "bottom" ? 0 : H });
     }
 
     stack(out, "x", xd, F);
     stack(out, "y", yd, F);
 
     for (const [label, g] of groups)
-      withTags(g.tags, () => callout(out, g.s, g.v, `${g.n > 1 ? g.n + "X " : ""}${label}`));
+      withTags(g.tags, () => callout(out, g.s, g.v, `${g.n > 1 ? g.n + "X " : ""}${label}`), g.edits);
 
     // Where other faces join this one.
     for (const ch of children) {
-      const a = ch.attach, o = a.offset || 0, w = ch.width, m = 2, h = 2.5;
+      const a = ch.attach, o = a.offset, w = ch.width, h = 2.5, k = C.bendCoord(p, a), CP = `p${doc.panels.indexOf(ch)}`;
+      const inset = { left: k, right: W - k, bottom: k, top: H - k }[a.edge];
+      const m = 2 - inset; // just outside the bend line
       const seg = {
         top: [o, H + m, o + w, H + m, o + w + 1, H + m - h * 0.35],
         bottom: [o, -m, o + w, -m, o + w + 1, -m - h * 0.35],
         left: [-m, o, -m, o + w, -m - h * 0.3, o + w + 1],
         right: [W + m, o, W + m, o + w, W + m - h * 0.3, o + w + 1],
       }[a.edge];
-      withTags([`p${doc.panels.indexOf(ch)}.attach`], () => {
+      withTags([`${CP}.attach`], () => {
         line(out, seg[0], seg[1], seg[2], seg[3], "phantom", "JOINTS");
         text(out, seg[4], seg[5], ch.id, h, { layer: "JOINTS" });
-      });
+      }, [E(`${CP}.attach.offset`, `${ch.id} · starts along ${p.id}'s ${a.edge} side`), E(`${CP}.attach.line.value`, `${ch.id} · bend line from ${p.id}'s ${a.line.ref} edge`)]);
     }
 
-    // Title lines above the view, top line first.
-    const lines = [[`${p.id}${p.name ? " — " + p.name.toUpperCase() : ""}`, 4, `${P}.name`]];
-    if (p.thickness > 0) lines.push([`THICKNESS ${F(p.thickness)}`, 2.5, `${P}.thickness`]);
-    if (p.attach) {
-      const a = p.attach, bend = a.angle ? `BENT ${a.angle}° TOWARD ${a.toward.toUpperCase()} OF ${a.parent}` : "FLAT (NO BEND)";
-      lines.push([`JOINS ${a.parent} ${a.edge.toUpperCase()} EDGE, ${bend}`, 2.5, `${P}.attach`]);
-      lines.push([`JOINED EDGE DRAWN AT BOTTOM; LEFT END ${F(a.offset || 0)} FROM ${a.parent}'S ${C.edgeStartName(a.edge).toUpperCase()} END`, 2.5, `${P}.attach`]);
-    }
+    // Title lines above the view, top line first: [text, size, tag, edits].
+    const lines = [[`${p.id}${p.name ? " — " + p.name.toUpperCase() : ""}`, 4, `${P}.name`, null]];
+    if (p.thickness > 0) lines.push([`THICKNESS ${F(p.thickness)}`, 2.5, `${P}.thickness`, [E(`${P}.thickness`, `${p.id} · thickness`)]]);
+    if (p.attach && C.attachComplete(p)) {
+      const a = p.attach, T = `${P}.attach`, bend = a.angle ? `BENT ${a.angle}° TOWARD ${a.toward.toUpperCase()} OF ${a.parent}` : "FLAT (NO BEND)";
+      lines.push([`JOINS ${a.parent} ALONG ITS ${a.edge.toUpperCase()} SIDE, ${bend}`, 2.5, T, [E(`${T}.angle`, `${p.id} · bend angle (degrees)`, "num")]]);
+      lines.push([`BEND LINE ${F(a.line.value)} FROM ${a.parent}'S ${a.line.ref.toUpperCase()} EDGE`, 2.5, T, [E(`${T}.line.value`, `${p.id} · bend line from ${a.parent}'s ${a.line.ref} edge`)]]);
+      lines.push([`JOINED EDGE DRAWN AT BOTTOM; LEFT END ${F(a.offset)} FROM ${a.parent}'S ${C.edgeStartName(a.edge).toUpperCase()} END`, 2.5, T, [E(`${T}.offset`, `${p.id} · starts along ${a.parent}'s ${a.edge} side`)]]);
+    } else if (p.attach) lines.push(["JOINT NOT FULLY ENTERED: NOT PLACED IN 3D", 2.5, `${P}.attach`, null]);
     const bb = C.bbox(out);
     let y = bb.maxY + 4;
     for (let i = lines.length - 1; i >= 0; i--) {
-      withTags([lines[i][2]], () => text(out, bb.minX, y, lines[i][0], lines[i][1]));
-      y += lines[i][1] + 1.8;
+      const [s, size, tag, edits] = lines[i];
+      withTags([tag], () => text(out, bb.minX, y, s, size), edits);
+      y += size + 1.8;
     }
     return out;
   }
@@ -338,10 +379,18 @@
   function titleBlock(doc, minWidth) {
     const out = [];
     const u = C.UNITS[doc.units];
+    // Loud failure: a drawing made from incomplete or inconsistent measurements says so on its face.
+    const issues = C.validate(doc).length;
     const rows = [
       [doc.name ? doc.name.toUpperCase() : "UNTITLED PART", 5],
+      ...(issues
+        ? [[`NOT VERIFIED: ${issues} UNRESOLVED ISSUE${issues > 1 ? "S" : ""}. SEE THE WARNINGS IN CALIPER-TO-DIAGRAM.`, 4]]
+        : []),
       [`DIMENSIONS IN ${u.name}. SCALE 1:1 WHEN PRINTED AT 100% (ACTUAL SIZE).`, 2.5],
       ["HOLE AND CUTOUT POSITIONS ARE DIMENSIONED FROM THE PANEL EDGE SHOWN.", 2.5],
+      ...(doc.panels.some((p) => p.attach)
+        ? [["BENT FACES: ALL SIZES ARE OUTSIDE DIMENSIONS, TO THE OUTSIDE OF EACH BEND (SHARP BENDS).", 2.5]]
+        : []),
       [`DRAWN ${new Date().toISOString().slice(0, 10)} WITH CALIPER-TO-DIAGRAM`, 2.5],
       ...String(doc.notes || "")
         .split(/\r?\n/)
@@ -376,7 +425,7 @@
     const frames = C.panelFrames(doc);
     let x = 0, tallest = 0;
     for (const p of drawable) {
-      const kids = doc.panels.filter((k) => k.attach && k.attach.parent === p.id && C.panelComplete(k));
+      const kids = doc.panels.filter((k) => k.attach && k.attach.parent === p.id && C.panelComplete(k) && C.attachComplete(k));
       const v = panelView(doc, p, kids), bb = C.bbox(v);
       out.push(...shift(v, x - bb.minX, -bb.minY));
       x += bb.maxX - bb.minX + VIEW_GAP;

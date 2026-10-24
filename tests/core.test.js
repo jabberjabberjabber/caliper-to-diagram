@@ -58,7 +58,7 @@ test("angled corner replaces the corner with the hypotenuse", () => {
 });
 
 test("closed slot: two straight sides plus two half circles", () => {
-  const slot = { ...C.newSlot(), width: 4, length: 12, x: { ref: "left", value: 2, to: "near" }, y: { ref: "bottom", value: 5, to: "center" } };
+  const slot = { ...C.newSlot(), orient: "h", open: false, width: 4, length: 12, x: { ref: "left", value: 2, to: "near" }, y: { ref: "bottom", value: 5, to: "center" } };
   const p = panel(30, 10, [slot]);
   const s = C.slotGeom(p, slot);
   assert.deepEqual([s.a, s.b], [[4, 5], [12, 5]]);
@@ -80,7 +80,7 @@ test("a hole running off an edge becomes a half-round notch", () => {
 test("joined faces are placed in 3D", () => {
   const doc = example("pcie-bracket.json");
   const F = C.panelFrames(doc).get("B");
-  assert.deepEqual(F.o, [0, 112, 0]);
+  assert.deepEqual(F.o, [0, 112, 0.9]); // starts on A's front face: the outside of a bend toward the back
   // 90 deg toward the back of A: B's y axis points to -z.
   close(F.y[2], -1, "y.z");
   close(F.y[1], 0, "y.y");
@@ -88,7 +88,7 @@ test("joined faces are placed in 3D", () => {
   const fan = C.panelFrames(example("fan-stand.json"));
   close(fan.get("B").y[2], -1, "left leg goes back");
   close(fan.get("C").y[2], -1, "right leg goes back");
-  assert.deepEqual(fan.get("C").o, [140, 0, 0]);
+  assert.deepEqual(fan.get("C").o, [140, 0, 3]);
 });
 
 test("examples render and export without warnings", () => {
@@ -109,6 +109,89 @@ test("examples render and export without warnings", () => {
     assert.equal((scad.match(/\(/g) || []).length, (scad.match(/\)/g) || []).length, `${name}: balanced parentheses`);
     assert.ok(!/NaN|undefined/.test(scad));
   }
+});
+
+test("the bend line is where the user says; the app only checks it against the material", () => {
+  // 22 wide plate with a 4 wide strip removed along most of its left side (a trimmed slot cover).
+  const strip = { type: "cutout", width: 4, height: 114, x: { ref: "left", value: 0 }, y: { ref: "bottom", value: 0 } };
+  const flange = (line, offset, width) => ({
+    id: "B", width, height: 10, thickness: 1, features: [],
+    attach: { parent: "A", edge: "left", line, offset, angle: 90, toward: "back" },
+  });
+  const doc = { panels: [{ id: "A", width: 22, height: 121, thickness: 1, attach: null, features: [strip] }], units: "mm", decimals: 2 };
+  const A = doc.panels[0];
+
+  // Measured from the left edge, or from the right edge: same bend line, same placement.
+  doc.panels[1] = flange({ ref: "left", value: 4 }, 30, 60);
+  assert.deepEqual(C.jointCoverage(A, doc.panels[1]), { overlap: 60, covered: true });
+  assert.deepEqual(C.panelFrames(doc).get("B").o, [4, 30, 1]);
+  assert.deepEqual(C.validate(doc), []);
+
+  // The corner is solid: the flange's outer surface is the bend line (x = 4) and its 1 mm of
+  // thickness lies inside the bend (x 4..5), overlapping A, which spans z 0..1. Nothing is missing
+  // at the junction.
+  const F = C.panelFrames(doc).get("B");
+  const inner = C.toWorld(F, [0, 0, F.tdir * 1]), farEnd = C.toWorld(F, [0, 10, 0]);
+  [[inner, [5, 30, 1]], [farEnd, [4, 30, -9]]].forEach(([got, want]) => got.forEach((v, i) => close(v, want[i], "corner")));
+
+  doc.panels[1] = flange({ ref: "right", value: 18 }, 30, 60);
+  assert.deepEqual(C.panelFrames(doc).get("B").o, [4, 30, 1]);
+
+  // Bend line left at the cut-away outline: placed where the user said, and flagged loudly.
+  doc.panels[1] = flange({ ref: "left", value: 0 }, 30, 60);
+  assert.deepEqual(C.panelFrames(doc).get("B").o, [0, 30, 1]);
+  assert.match(C.validate(doc)[0], /doesn't run along an edge/);
+
+  // Partly over the cutout: reports how much is attached.
+  doc.panels[1] = flange({ ref: "left", value: 4 }, 100, 20);
+  assert.deepEqual(C.jointCoverage(A, doc.panels[1]), { overlap: 14, covered: false });
+  assert.match(C.validate(doc)[0], /only 14\.00 mm of its 20\.00 mm/);
+});
+
+test("nothing is guessed: new joints and features start blank and aren't used until entered", () => {
+  const doc = C.newDoc();
+  Object.assign(doc, { name: "x" });
+  Object.assign(doc.panels[0], { width: 50, height: 50, thickness: 1 });
+  doc.panels.push(C.newPanel("B", C.newAttach()));
+  Object.assign(doc.panels[1], { width: 10, height: 10, thickness: 1 });
+  assert.equal(C.nextStep(doc).path, "p1.attach.parent");
+  assert.equal(C.panelFrames(doc).has("B"), false);
+  assert.ok(C.validate(doc).some((w) => /isn't fully entered/.test(w)));
+  Object.assign(doc.panels[1].attach, { parent: "A", edge: "top", line: { ref: "top", value: 0 }, offset: 0, angle: 90 });
+  assert.equal(C.nextStep(doc).path, "p1.attach.toward");
+  doc.panels[1].attach.toward = "back";
+  assert.equal(C.panelFrames(doc).has("B"), true);
+
+  const angle = C.newAngle(), slot = C.newSlot();
+  assert.equal(angle.toward, null);
+  assert.ok([angle.p1.x, angle.p1.y, angle.p2.x, angle.p2.y].every((a) => a.value === null));
+  assert.equal(slot.orient, null);
+  assert.equal(slot.open, null);
+  doc.panels[0].features.push(slot);
+  assert.equal(C.nextStep(doc).path, "p0.f0.orient");
+});
+
+test("problems are loud: the drawing is stamped and OpenSCAD refuses to invent a thickness", () => {
+  const doc = example("pcie-bracket.json");
+  assert.ok(!C.toSVG(C.buildSheet(doc)).includes("NOT VERIFIED"));
+  doc.panels[0].features[3].x.value = 17; // hole now breaks the edge
+  assert.ok(C.toSVG(C.buildSheet(doc)).includes("NOT VERIFIED: 1 UNRESOLVED ISSUE."));
+  doc.panels[1].thickness = null;
+  assert.throws(() => C.toOpenSCAD(doc), /thickness of panel B/);
+});
+
+test("numbers on the drawing link back to the measurements behind them", () => {
+  const sheet = C.buildSheet(example("pcie-bracket.json"));
+  const linked = (path) => sheet.prims.filter((p) => p.t === "text" && (p.edits || []).some((e) => e.path === path));
+  assert.equal(linked("p0.width")[0].s, "18.40");
+  // Hole 4 is measured to its near side (7.6) but dimensioned to its center (9.20): the link
+  // edits the measurement, not the derived number.
+  assert.equal(linked("p0.f3.x.value")[0].s, "9.20");
+  assert.equal(linked("p0.f3.diameter")[0].s, "2X Ø3.20 THRU");
+  assert.ok(linked("p0.f4.diameter").length, "the shared callout links both holes");
+  assert.ok(linked("p1.attach.angle").length, "the joint note links the bend angle");
+  assert.ok(C.toSVG(sheet, { interactive: true }).includes('data-edits="'));
+  assert.ok(!C.toSVG(sheet, { physical: true }).includes("data-edits"), "exports carry no links");
 });
 
 test("the section being edited is colored on screen only", () => {
